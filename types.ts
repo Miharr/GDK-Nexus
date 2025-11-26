@@ -15,11 +15,12 @@ export interface Measurements {
 }
 
 export interface Financials {
-  totalDealPrice: number | ''; 
+  pricePerVigha: number | ''; 
+  totalDealPrice: number; // Calculated (Read-only)
   downPaymentPercent: number | ''; 
-  downPaymentAmount: number | ''; // Now bi-directional
-  totalDurationMonths: number | ''; // New duration field
-  installmentFrequency: number; // 1 = Monthly, 2 = Bi-monthly, etc.
+  downPaymentAmount: number | ''; 
+  totalDurationMonths: number | ''; 
+  numberOfInstallments: number | ''; 
   purchaseDate: string;
 }
 
@@ -29,6 +30,7 @@ export interface Overheads {
   planPassFees: number | '';
   naExpense: number | '';
   naPremium: number | '';
+  developmentCost: number | ''; // New field
 }
 
 export interface PaymentScheduleItem {
@@ -41,22 +43,25 @@ export interface PaymentScheduleItem {
 
 export interface CalculationResult {
   totalSqMt: number;
-  apAreaSqMt: number; // 60%
+  fpAreaSqMt: number; 
   
-  // Conversions for display
   inputInVigha: number;
-  apInVigha: number;
+  fpInVigha: number; 
   
-  totalJantriValue: number; // On 100%
-  apJantriValue: number; // On 60%
+  totalJantriValue: number; // 100%
+  fpJantriValue: number; // 60%
+  
+  stampDuty100: number; // New
+  stampDuty60: number; // New
   
   totalAdditionalExpenses: number;
-  landedCost: number; 
+  
+  landedCost100: number; // New (Total Cost based on 100% Stamp)
+  landedCost60: number; // New (Total Cost based on 60% Stamp)
   
   schedule: PaymentScheduleItem[];
   grandTotalPayment: number; 
   
-  // Unit Costs
   costPerSqMt: number;
   costPerVaar: number;
   costPerVigha: number;
