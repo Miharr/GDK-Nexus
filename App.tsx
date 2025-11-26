@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Landmark, 
   LayoutGrid, 
-  HardHat, 
   Hexagon, 
   ArrowRight,
   Construction
@@ -11,7 +10,7 @@ import {
 import { Loader } from './components/Loader';
 import { LandDealStructurer } from './components/LandDealStructurer';
 
-type ViewState = 'dashboard' | 'loading' | 'land-structurer' | 'plotting' | 'construction';
+type ViewState = 'dashboard' | 'loading' | 'land-structurer' | 'plotting';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>('dashboard');
@@ -24,7 +23,7 @@ const App: React.FC = () => {
     // Simulate system loading time
     setTimeout(() => {
       setCurrentView(view);
-    }, 1800);
+    }, 1200);
   };
 
   const handleBackToDash = () => {
@@ -32,24 +31,18 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen w-full bg-slate-950 text-white font-sans selection:bg-safety-500/30 overflow-hidden relative">
+    <div className="min-h-screen w-full bg-[#F1F5F9] text-slate-800 font-sans overflow-hidden relative">
       
-      {/* Dynamic Background */}
-      <div className="absolute inset-0 z-0">
-         <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black opacity-80"></div>
-         <div className="absolute w-full h-full bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-5 mix-blend-overlay"></div>
-      </div>
-
       <AnimatePresence mode="wait">
         
         {/* --- VIEW: LOADING --- */}
         {currentView === 'loading' && (
           <motion.div
             key="loader"
-            className="absolute inset-0 z-50"
+            className="absolute inset-0 z-50 bg-[#F1F5F9]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0, scale: 1.1, filter: "blur(10px)" }}
+            exit={{ opacity: 0 }}
             transition={{ duration: 0.5 }}
           >
             <Loader />
@@ -63,39 +56,39 @@ const App: React.FC = () => {
             className="relative z-10 flex flex-col h-screen p-6 md:p-12 overflow-y-auto"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20, filter: "blur(5px)" }}
-            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.6 }}
           >
             {/* Header */}
             <header className="flex justify-between items-center mb-16 md:mb-24">
-              <div className="flex items-center gap-3 group cursor-default">
-                <div className="p-2 bg-white/5 rounded-lg border border-white/10 group-hover:border-safety-500/50 transition-colors">
-                  <Hexagon className="text-safety-500 fill-safety-500/10" size={32} />
+              <div className="flex items-center gap-4 group cursor-default">
+                <div className="w-16 h-16 rounded-2xl bg-[#F1F5F9] shadow-[6px_6px_12px_#cbd5e1,-6px_-6px_12px_#ffffff] flex items-center justify-center border border-white/50">
+                  <Hexagon className="text-safety-500" size={32} />
                 </div>
                 <div>
-                  <h1 className="text-3xl md:text-4xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-400">
+                  <h1 className="text-3xl md:text-4xl font-black tracking-tighter text-slate-800">
                     GDK NEXUS <span className="text-safety-500 font-mono text-2xl align-top">2442</span>
                   </h1>
-                  <p className="text-xs text-slate-500 font-mono tracking-[0.3em] uppercase">Enterprise Command System</p>
+                  <p className="text-xs text-slate-400 font-mono tracking-[0.3em] uppercase">Enterprise Command System</p>
                 </div>
               </div>
               <div className="hidden md:block text-right">
-                <div className="text-xs text-slate-500 font-mono">SYSTEM STATUS</div>
-                <div className="flex items-center gap-2 text-emerald-500 text-sm font-bold">
+                <div className="text-xs text-slate-400 font-mono">SYSTEM STATUS</div>
+                <div className="flex items-center gap-2 text-safety-500 text-sm font-bold justify-end">
                   <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-safety-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-safety-500"></span>
                   </span>
                   ONLINE
                 </div>
               </div>
             </header>
 
-            {/* Modules Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-7xl mx-auto w-full flex-1 items-center">
+            {/* Modules Grid - Centered 2 Cols */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-10 max-w-5xl mx-auto w-full flex-1 items-center content-center">
               
               {/* Card 1: Land Acquisition */}
-              <GlassCard 
+              <NeuCard 
                 title="Land Acquisition"
                 subtitle="Deal Structuring & Jantri"
                 icon={<Landmark size={32} />}
@@ -104,7 +97,7 @@ const App: React.FC = () => {
               />
 
               {/* Card 2: Plotting */}
-              <GlassCard 
+              <NeuCard 
                 title="Plotting & Inventory"
                 subtitle="Costing & Yield Analysis"
                 icon={<LayoutGrid size={32} />}
@@ -112,19 +105,10 @@ const App: React.FC = () => {
                 onClick={() => handleModuleSelect('plotting')}
               />
 
-              {/* Card 3: Construction */}
-              <GlassCard 
-                title="Construction Estimator"
-                subtitle="BoQ & Material Planning"
-                icon={<HardHat size={32} />}
-                delay={0.3}
-                onClick={() => handleModuleSelect('construction')}
-              />
-
             </div>
 
             {/* Footer */}
-            <footer className="mt-12 text-center text-slate-600 text-xs font-mono">
+            <footer className="mt-12 text-center text-slate-400 text-xs font-mono">
               SECURE CONNECTION // ENCRYPTED V.4.2.0
             </footer>
           </motion.div>
@@ -134,7 +118,7 @@ const App: React.FC = () => {
         {currentView === 'land-structurer' && (
           <motion.div
             key="module-1"
-            className="absolute inset-0 z-10 bg-slate-950 overflow-y-auto"
+            className="absolute inset-0 z-10 bg-[#F1F5F9] overflow-y-auto"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -144,25 +128,25 @@ const App: React.FC = () => {
         )}
 
         {/* --- VIEW: PLACEHOLDERS --- */}
-        {(currentView === 'plotting' || currentView === 'construction') && (
+        {currentView === 'plotting' && (
           <motion.div
             key="placeholder"
-            className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950"
+            className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#F1F5F9]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <div className="bg-slate-900/50 p-12 rounded-2xl border border-white/10 backdrop-blur-xl text-center max-w-md mx-4">
-              <div className="bg-safety-500/10 p-4 rounded-full w-fit mx-auto mb-6">
-                <Construction className="text-safety-500" size={48} />
+            <div className="bg-[#F1F5F9] p-12 text-center max-w-md mx-4 rounded-3xl shadow-[8px_8px_16px_#cbd5e1,-8px_-8px_16px_#ffffff] border border-white/50">
+              <div className="w-20 h-20 mx-auto mb-6 text-safety-500 bg-gray-100 rounded-full flex items-center justify-center shadow-inner">
+                <Construction size={40} />
               </div>
-              <h2 className="text-2xl font-bold text-white mb-2">Module Offline</h2>
-              <p className="text-slate-400 mb-8">
+              <h2 className="text-2xl font-bold text-slate-800 mb-2">Module Offline</h2>
+              <p className="text-slate-500 mb-8">
                 This sector of the Nexus is currently under development. Access restricted.
               </p>
               <button 
                 onClick={handleBackToDash}
-                className="px-6 py-2 bg-white text-slate-950 font-bold rounded hover:bg-slate-200 transition-colors"
+                className="bg-safety-500 text-white px-6 py-3 font-bold rounded-xl shadow-[4px_4px_8px_#cbd5e1,-4px_-4px_8px_#ffffff] hover:bg-safety-600 transition-all active:shadow-inner"
               >
                 Return to Command
               </button>
@@ -175,9 +159,9 @@ const App: React.FC = () => {
   );
 };
 
-// --- Sub-Component: Glass Card ---
+// --- Sub-Component: Neumorphic Card ---
 
-interface GlassCardProps {
+interface NeuCardProps {
   title: string;
   subtitle: string;
   icon: React.ReactNode;
@@ -185,36 +169,31 @@ interface GlassCardProps {
   onClick: () => void;
 }
 
-const GlassCard: React.FC<GlassCardProps> = ({ title, subtitle, icon, delay, onClick }) => {
+const NeuCard: React.FC<NeuCardProps> = ({ title, subtitle, icon, delay, onClick }) => {
   return (
     <motion.button
       onClick={onClick}
-      className="group relative flex flex-col h-64 w-full overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-8 text-left backdrop-blur-xl transition-all duration-500 hover:border-safety-500/50 hover:bg-white/10"
+      className="group relative flex flex-col h-72 w-full overflow-hidden p-10 text-left transition-all duration-300 bg-[#F1F5F9] rounded-[2rem] border border-white/60 shadow-[9px_9px_18px_#cbd5e1,-9px_-9px_18px_#ffffff] hover:shadow-[12px_12px_24px_#cbd5e1,-12px_-12px_24px_#ffffff] active:shadow-[inset_6px_6px_12px_#cbd5e1,inset_-6px_-6px_12px_#ffffff]"
       initial={{ opacity: 0, y: 50 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay: delay }}
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
     >
-      {/* Glow Effect */}
-      <div className="absolute -right-20 -top-20 h-40 w-40 rounded-full bg-safety-500/20 blur-[60px] transition-all duration-500 group-hover:bg-safety-500/30" />
-
-      {/* Icon */}
-      <div className="mb-auto">
-        <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-white/5 text-slate-300 transition-colors group-hover:bg-safety-500 group-hover:text-white">
+      {/* Main Icon */}
+      <div className="mb-auto relative z-10">
+        <div className="w-16 h-16 rounded-2xl bg-[#F1F5F9] border border-white flex items-center justify-center text-slate-400 group-hover:text-safety-500 transition-colors shadow-[4px_4px_8px_#cbd5e1,-4px_-4px_8px_#ffffff]">
           {icon}
         </div>
       </div>
 
       {/* Text */}
       <div className="relative z-10">
-        <h3 className="text-xl font-bold text-white group-hover:text-safety-400 transition-colors">{title}</h3>
-        <p className="mt-1 text-sm text-slate-400 group-hover:text-slate-300">{subtitle}</p>
+        <h3 className="text-2xl font-bold text-slate-800 group-hover:text-slate-900 transition-colors">{title}</h3>
+        <p className="mt-2 text-base text-slate-400 group-hover:text-slate-500 transition-colors">{subtitle}</p>
       </div>
 
       {/* Action Arrow */}
-      <div className="absolute bottom-8 right-8 translate-x-10 opacity-0 transition-all duration-300 group-hover:translate-x-0 group-hover:opacity-100">
-        <ArrowRight className="text-safety-500" />
+      <div className="absolute bottom-10 right-10 translate-x-4 opacity-0 transition-all duration-300 group-hover:translate-x-0 group-hover:opacity-100 z-10">
+        <ArrowRight className="text-safety-500 w-8 h-8" />
       </div>
     </motion.button>
   );

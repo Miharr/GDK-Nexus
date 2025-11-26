@@ -8,9 +8,10 @@ import {
   Calculator,
   RotateCcw,
   Download,
-  CheckCircle2,
-  Circle,
-  ArrowLeft
+  ArrowRightLeft,
+  ArrowLeft,
+  Clock,
+  ArrowDown
 } from 'lucide-react';
 import { Card } from './Card';
 import { SummaryChart } from './SummaryChart';
@@ -20,7 +21,8 @@ import {
   Financials, 
   Overheads, 
   CalculationResult, 
-  PaymentScheduleItem
+  PaymentScheduleItem,
+  UnitType
 } from '../types';
 import { 
   formatCurrency, 
@@ -32,37 +34,45 @@ import {
 // Declare html2pdf for TypeScript
 declare var html2pdf: any;
 
+const CONVERSION_RATES = {
+  Vigha: 1,
+  SqMeter: 2377.73,
+  Vaar: 2843.71,
+  Guntha: 23.50,
+  SqKm: 4.00
+};
+
 interface Props {
   onBack: () => void;
 }
 
 export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
-  // --- STATE INITIALIZATION ---
   
+  // --- STATE ---
   const [identity, setIdentity] = useState<LandIdentity>({
-    village: '',
-    tpScheme: '',
-    fpNumber: '',
-    blockSurveyNumber: '',
+    village: '', tpScheme: '', fpNumber: '', blockSurveyNumber: '',
   });
 
   const [measurements, setMeasurements] = useState<Measurements>({
-    areaSqMt: '',
+    areaInput: '',
+    inputUnit: 'SqMeter',
+    displayUnit: 'Vigha', 
     jantriRate: '',
   });
 
+  const [analysisUnit, setAnalysisUnit] = useState<UnitType>('Vigha');
+
   const [financials, setFinancials] = useState<Financials>({
     totalDealPrice: '', 
-    downPaymentPercent: '', 
-    downPaymentAmount: 0,
-    numberOfInstallments: '', 
+    downPaymentPercent: 20, 
+    downPaymentAmount: '', 
+    totalDurationMonths: 12, 
+    installmentFrequency: 1, 
     purchaseDate: new Date().toISOString().split('T')[0],
   });
 
   const [overheads, setOverheads] = useState<Overheads>({
-    stampDutyType: 'DealPrice',
-    stampDutyPercent: '',
-    stampDutyAmount: 0,
+    stampDutyPercent: 4.9,
     architectFees: '',
     planPassFees: '',
     naExpense: '',
@@ -71,88 +81,69 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
 
   const [result, setResult] = useState<CalculationResult | null>(null);
 
-  // --- CALCULATIONS ---
-
+  // --- CALCULATION ENGINE ---
   useEffect(() => {
-    // Helper to safely get numbers from inputs that might be ''
     const getNum = (val: number | string) => (val === '' ? 0 : Number(val));
 
-    // 1. Basic Area & Jantri
-    const totalSqMt = getNum(measurements.areaSqMt);
-    // Strict Conversion: 1 Vigha = 2377.73 Sq Mt
-    const vighaEquivalent = totalSqMt > 0 ? totalSqMt / 2377.73 : 0;
-    const totalJantriValue = totalSqMt * getNum(measurements.jantriRate);
-    
-    // 2. Deal Price
-    const dealPrice = getNum(financials.totalDealPrice);
-
-    // 3. Stamp Duty Logic (Radio Button Selection)
-    const stampPercent = getNum(overheads.stampDutyPercent);
-    let baseForStamp = 0;
-    if (overheads.stampDutyType === 'DealPrice') {
-      baseForStamp = dealPrice;
+    const inputVal = getNum(measurements.areaInput);
+    let valInVigha = 0;
+    if (measurements.inputUnit === 'Vigha') {
+      valInVigha = inputVal;
     } else {
-      baseForStamp = totalJantriValue;
+      valInVigha = inputVal / CONVERSION_RATES[measurements.inputUnit];
     }
-    const calculatedStampDuty = baseForStamp * (stampPercent / 100);
+    const totalSqMt = valInVigha * CONVERSION_RATES.SqMeter;
+    const totalVaar = valInVigha * CONVERSION_RATES.Vaar;
 
-    // 4. Down Payment Logic
-    const dpPercent = getNum(financials.downPaymentPercent);
-    const calculatedDownPayment = dealPrice * (dpPercent / 100);
-    
-    // 5. Installment Logic
-    // Formula: (Deal Price - (Down Payment + Jantri Value)) / Number of Installments
-    let installmentPool = dealPrice - calculatedDownPayment - totalJantriValue;
-    
-    const numInstallments = getNum(financials.numberOfInstallments);
-    const installmentAmount = numInstallments > 0 
-      ? installmentPool / numInstallments 
-      : 0;
+    const apAreaSqMt = totalSqMt * 0.60;
+    const apInVigha = valInVigha * 0.60;
 
-    // 6. Payment Schedule Generation
+    const jantriRate = getNum(measurements.jantriRate);
+    const totalJantriValue = totalSqMt * jantriRate;
+    const apJantriValue = apAreaSqMt * jantriRate;
+
+    const dealPrice = getNum(financials.totalDealPrice);
+    const dpAmount = getNum(financials.downPaymentAmount);
+
+    const stampPercent = getNum(overheads.stampDutyPercent);
+    const stampDutyAmount = totalJantriValue * (stampPercent / 100);
+
     const schedule: PaymentScheduleItem[] = [];
     const purchaseDateObj = new Date(financials.purchaseDate);
+    const totalMonths = getNum(financials.totalDurationMonths);
+    const freq = financials.installmentFrequency;
 
-    // Row 1: Down Payment (Due on Purchase Date)
-    if (dealPrice > 0 || calculatedDownPayment > 0) {
+    const dpDueDate = addDays(purchaseDateObj, 90);
+    
+    if (dealPrice > 0 || dpAmount > 0) {
       schedule.push({
         id: 1,
-        date: formatDate(purchaseDateObj),
-        description: 'Down Payment (Token)',
-        amount: calculatedDownPayment,
+        date: formatDate(dpDueDate),
+        description: 'Down Payment (Day 90)',
+        amount: dpAmount,
         type: 'Token'
       });
     }
 
-    // Rows: Installments
-    // 1st Installment is Purchase Date + 90 Days
-    let currentDueDate = addDays(purchaseDateObj, 90);
+    const balanceToPay = dealPrice - dpAmount;
+    const effectiveInstallmentMonths = Math.max(0, totalMonths - 3);
+    
+    if (balanceToPay > 0 && effectiveInstallmentMonths > 0) {
+      const numberOfPayments = Math.ceil(effectiveInstallmentMonths / freq);
+      const amountPerPayment = balanceToPay / numberOfPayments;
+      let currentDate = addMonths(purchaseDateObj, 3); 
 
-    for (let i = 0; i < numInstallments; i++) {
-      schedule.push({
-        id: i + 2,
-        date: formatDate(currentDueDate),
-        description: `Installment ${i + 1}`,
-        amount: installmentAmount,
-        type: 'Installment'
-      });
-      // Subsequent installments are Monthly
-      currentDueDate = addMonths(currentDueDate, 1);
+      for (let i = 0; i < numberOfPayments; i++) {
+        currentDate = addMonths(currentDate, freq); 
+        schedule.push({
+          id: i + 2,
+          date: formatDate(currentDate),
+          description: `Installment ${i + 1}`,
+          amount: amountPerPayment,
+          type: 'Installment'
+        });
+      }
     }
-
-    // Row: Jantri (At the end)
-    if (totalJantriValue > 0) {
-      schedule.push({
-        id: 999,
-        date: formatDate(currentDueDate),
-        description: 'Jantri Amount (Final Registry)',
-        amount: totalJantriValue,
-        type: 'Jantri'
-      });
-    }
-
-    // 7. Totals
-    const totalSchedulePayment = schedule.reduce((sum, item) => sum + item.amount, 0);
 
     const totalAdditionalExpenses = 
       getNum(overheads.architectFees) + 
@@ -160,571 +151,517 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
       getNum(overheads.naExpense) + 
       getNum(overheads.naPremium);
 
-    const landedCost = dealPrice + calculatedStampDuty + totalAdditionalExpenses;
+    const landedCost = dealPrice + stampDutyAmount + totalAdditionalExpenses;
+    const grandTotalPayment = schedule.reduce((sum, item) => sum + item.amount, 0);
+
+    const costPerSqMt = totalSqMt > 0 ? landedCost / totalSqMt : 0;
+    const costPerVaar = totalVaar > 0 ? landedCost / totalVaar : 0;
+    const costPerVigha = valInVigha > 0 ? landedCost / valInVigha : 0;
 
     setResult({
-      totalSqMt,
-      vighaEquivalent,
-      totalJantriValue,
-      totalAdditionalExpenses,
-      landedCost,
-      schedule,
-      grandTotalPayment: totalSchedulePayment,
-      landCostPerSqMt: dealPrice / (totalSqMt || 1),
-      finalProjectCostPerSqMt: landedCost / (totalSqMt || 1),
+      totalSqMt, apAreaSqMt, inputInVigha: valInVigha, apInVigha,
+      totalJantriValue, apJantriValue, totalAdditionalExpenses, landedCost,
+      schedule, grandTotalPayment, costPerSqMt, costPerVaar, costPerVigha
     });
 
-  }, [measurements, financials, overheads.stampDutyPercent, overheads.stampDutyType, overheads.architectFees, overheads.planPassFees, overheads.naExpense, overheads.naPremium]); 
+  }, [measurements, financials, overheads]);
 
   // --- HANDLERS ---
-
   const handleClear = () => {
     setIdentity({ village: '', tpScheme: '', fpNumber: '', blockSurveyNumber: '' });
-    setMeasurements({ areaSqMt: '', jantriRate: '' });
-    setFinancials({ totalDealPrice: '', downPaymentPercent: '', downPaymentAmount: 0, numberOfInstallments: '', purchaseDate: new Date().toISOString().split('T')[0] });
-    setOverheads({ stampDutyType: 'DealPrice', stampDutyPercent: '', stampDutyAmount: 0, architectFees: '', planPassFees: '', naExpense: '', naPremium: '' });
+    setMeasurements({ areaInput: '', inputUnit: 'SqMeter', displayUnit: 'Vigha', jantriRate: '' });
+    setFinancials({ totalDealPrice: '', downPaymentPercent: 20, downPaymentAmount: '', totalDurationMonths: 12, installmentFrequency: 1, purchaseDate: new Date().toISOString().split('T')[0] });
+    setOverheads({ stampDutyPercent: 4.9, architectFees: '', planPassFees: '', naExpense: '', naPremium: '' });
+    setAnalysisUnit('Vigha');
     setResult(null);
   };
 
   const handleDownloadPDF = () => {
     const element = document.getElementById('pdf-template');
     if (!element) return;
-    element.style.display = 'block';
+    element.style.display = 'block'; 
     const opt = {
-      margin: [0.5, 0.5],
+      margin: 0.25,
       filename: `LandDeal_${identity.village || 'Report'}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
+      image: { type: 'jpeg', quality: 1 },
       html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
     };
     html2pdf().set(opt).from(element).save().then(() => {
-       element.style.display = 'none';
+       element.style.display = 'none'; 
     });
   };
 
-  const handlePercentChange = (val: string) => {
-    if (val === '') {
-      setFinancials(prev => ({ ...prev, downPaymentPercent: '' }));
-    } else {
-      const num = parseFloat(val);
-      setFinancials(prev => ({ ...prev, downPaymentPercent: isNaN(num) ? '' : num }));
-    }
+  const handleDealPriceChange = (val: string) => {
+    const price = val === '' ? 0 : Number(val);
+    const pct = Number(financials.downPaymentPercent);
+    const newAmount = price * (pct / 100);
+    setFinancials({ ...financials, totalDealPrice: val === '' ? '' : price, downPaymentAmount: newAmount > 0 ? newAmount : '' });
   };
 
-  // Adjusted Input Class for Darker Theme integration
-  const inputClass = "w-full bg-slate-800 text-white border border-slate-700 rounded-md p-2 text-sm focus:ring-2 focus:ring-safety-500 focus:border-safety-500 outline-none placeholder:text-slate-500 transition-all";
-  
+  const handleDpPercentChange = (val: string) => {
+    const pct = val === '' ? 0 : Number(val);
+    const price = Number(financials.totalDealPrice);
+    const newAmount = price * (pct / 100);
+    setFinancials({ ...financials, downPaymentPercent: val === '' ? '' : pct, downPaymentAmount: newAmount > 0 ? newAmount : '' });
+  };
+
+  const handleDpAmountChange = (val: string) => {
+    const amount = val === '' ? 0 : Number(val);
+    const price = Number(financials.totalDealPrice);
+    let newPct = 0;
+    if (price > 0) newPct = (amount / price) * 100;
+    setFinancials({ ...financials, downPaymentAmount: val === '' ? '' : amount, downPaymentPercent: newPct > 0 ? parseFloat(newPct.toFixed(2)) : '' });
+  };
+
   const getNum = (val: number | string) => (val === '' ? 0 : Number(val));
   const dealPrice = getNum(financials.totalDealPrice);
-  const calculatedStampDuty = overheads.stampDutyType === 'DealPrice' 
-    ? dealPrice * (getNum(overheads.stampDutyPercent) / 100)
-    : (getNum(measurements.areaSqMt) * getNum(measurements.jantriRate)) * (getNum(overheads.stampDutyPercent) / 100);
+  const calculatedStampDuty = (result?.totalJantriValue || 0) * (getNum(overheads.stampDutyPercent) / 100);
+  const convertValue = (valInVigha: number, unit: UnitType) => valInVigha * CONVERSION_RATES[unit];
+
+  // Styles
+  const labelClass = "block text-xs font-semibold text-slate-500 uppercase mb-1 ml-1";
+  const inputClass = "w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-2 focus:ring-safety-500 focus:border-safety-500 block p-2.5 outline-none transition-all";
+  const selectClass = "w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-2 focus:ring-safety-500 focus:border-safety-500 block p-2.5 outline-none transition-all";
 
   return (
-    <div className="min-h-screen pb-12 bg-slate-950 text-slate-200 animate-in fade-in duration-700">
+    <div className="min-h-screen pb-12 bg-slate-50 text-slate-800 animate-in fade-in duration-500 font-sans">
+      
       {/* Header */}
-      <header className="bg-slate-900/50 backdrop-blur-md border-b border-white/5 pt-6 pb-6 px-4 md:px-8 shadow-2xl relative z-10">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-4 w-full md:w-auto">
-             <button onClick={onBack} className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-white">
-                <ArrowLeft size={24} />
+      <header className="bg-white border-b border-slate-200 py-4 px-4 md:px-8 shadow-sm sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
+          <div className="flex items-center gap-4">
+             <button onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">
+                <ArrowLeft size={20} />
              </button>
-            <div className="text-center md:text-left">
-              <h1 className="text-xl md:text-2xl font-bold flex items-center gap-3 text-white">
-                <Building2 className="text-safety-500 h-6 w-6" />
+            <div>
+              <h1 className="text-lg md:text-xl font-bold flex items-center gap-2 text-slate-900">
+                <Building2 className="text-safety-500 h-5 w-5" />
                 Land Acquisition
               </h1>
-              <p className="text-slate-400 text-xs uppercase tracking-widest">Module 01: Deal Structurer</p>
             </div>
           </div>
-          <div className="flex items-center gap-3 w-full md:w-auto justify-center md:justify-end">
-            <button 
-              onClick={handleClear}
-              className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 hover:text-safety-500 px-4 py-2 rounded-lg transition-colors border border-slate-700 text-sm font-medium"
-            >
-              <RotateCcw size={16} />
-              Clear
+          <div className="flex items-center gap-3">
+            <button onClick={handleClear} className="px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 flex items-center gap-2 transition-colors">
+              <RotateCcw size={16} /> <span className="hidden md:inline">Clear</span>
             </button>
-            <button 
-              onClick={handleDownloadPDF}
-              className="flex items-center gap-2 bg-safety-600 hover:bg-safety-500 px-4 py-2 rounded-lg transition-colors text-white shadow-lg shadow-safety-900/20 text-sm font-medium"
-            >
-              <Download size={18} />
-              PDF Report
+            <button onClick={handleDownloadPDF} className="bg-safety-500 hover:bg-safety-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 shadow-md shadow-safety-200 transition-all">
+              <Download size={16} /> PDF
             </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 md:px-8 mt-8 grid grid-cols-1 lg:grid-cols-12 gap-6 relative z-20">
+      {/* Main Bento Grid */}
+      <main className="max-w-7xl mx-auto px-4 md:px-8 mt-8 grid grid-cols-1 md:grid-cols-12 gap-6 pb-20">
         
-        {/* LEFT COLUMN: INPUTS */}
-        <div className="lg:col-span-5 space-y-6">
-          
-          {/* Section 1: Identity */}
-          <Card title="1. Land Identity" icon={<FileText size={20} />}>
+        {/* 1. Land Identity (Top Left) */}
+        <div className="md:col-span-5">
+          <Card title="1. Land Identity" icon={<FileText size={20} />} className="h-full">
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Village Name</label>
-                <input 
-                  type="text" 
-                  autoComplete="off"
-                  value={identity.village}
-                  onChange={e => setIdentity({...identity, village: e.target.value})}
-                  className={inputClass}
-                  placeholder="Enter Village Name"
-                />
+                <label className={labelClass}>Village Name</label>
+                <input type="text" autoComplete="off" value={identity.village} onChange={e => setIdentity({...identity, village: e.target.value})} className={inputClass} placeholder="Enter Name" />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">TP Scheme</label>
-                <input 
-                  type="text" 
-                  autoComplete="off"
-                  value={identity.tpScheme}
-                  onChange={e => setIdentity({...identity, tpScheme: e.target.value})}
-                  className={inputClass}
-                  placeholder="e.g. TP-1"
-                />
+                <label className={labelClass}>TP Scheme</label>
+                <input type="text" autoComplete="off" value={identity.tpScheme} onChange={e => setIdentity({...identity, tpScheme: e.target.value})} className={inputClass} placeholder="TP-1" />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">FP Number</label>
-                <input 
-                  type="text" 
-                  autoComplete="off"
-                  value={identity.fpNumber}
-                  onChange={e => setIdentity({...identity, fpNumber: e.target.value})}
-                  className={inputClass}
-                  placeholder="FP-101"
-                />
+                <label className={labelClass}>FP Number</label>
+                <input type="text" autoComplete="off" value={identity.fpNumber} onChange={e => setIdentity({...identity, fpNumber: e.target.value})} className={inputClass} placeholder="FP-101" />
               </div>
               <div className="col-span-2">
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Block / Survey Number</label>
-                <input 
-                  type="text" 
-                  autoComplete="off"
-                  value={identity.blockSurveyNumber}
-                  onChange={e => setIdentity({...identity, blockSurveyNumber: e.target.value})}
-                  className={inputClass}
-                  placeholder="Block 123 / Survey 45"
-                />
+                <label className={labelClass}>Block / Survey</label>
+                <input type="text" autoComplete="off" value={identity.blockSurveyNumber} onChange={e => setIdentity({...identity, blockSurveyNumber: e.target.value})} className={inputClass} placeholder="123 / 45" />
               </div>
             </div>
           </Card>
+        </div>
 
-          {/* Section 2: Measurements */}
-          <Card title="2. Measurement & Jantri" icon={<Ruler size={20} />}>
-            <div className="space-y-4">
-              {/* Area Input */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Area Input (Sq Meters)</label>
-                <div className="flex items-center gap-2">
-                  <input 
-                    type="number" 
-                    autoComplete="off"
-                    value={measurements.areaSqMt}
-                    onChange={e => setMeasurements({...measurements, areaSqMt: e.target.value === '' ? '' : Number(e.target.value)})}
-                    className={`${inputClass} text-lg font-semibold text-safety-500`}
-                    placeholder="0.00"
-                  />
-                  <span className="text-sm font-medium text-slate-500">Sq.Mt</span>
-                </div>
-              </div>
-
-              {/* Conversion Display */}
-              <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 flex justify-between items-center">
-                <div>
-                  <div className="text-xs text-safety-500 font-semibold uppercase tracking-wide">Equivalent Vigha</div>
-                  <div className="text-[10px] text-slate-500">1 Vigha = 2377.73 Sq Mt</div>
-                </div>
-                <div className="text-2xl font-bold text-white">
-                  {result?.vighaEquivalent.toFixed(2)} <span className="text-sm font-normal text-slate-400">Vigha</span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Jantri Rate (₹/SqMt)</label>
-                <input 
-                  type="number" 
-                  autoComplete="off"
-                  value={measurements.jantriRate}
-                  onChange={e => setMeasurements({...measurements, jantriRate: e.target.value === '' ? '' : Number(e.target.value)})}
-                  className={inputClass}
-                  placeholder="0.00"
-                />
-                <div className="text-right text-xs text-slate-500 mt-1">Total Jantri: {formatCurrency(result?.totalJantriValue || 0)}</div>
-              </div>
-            </div>
-          </Card>
-
-          {/* Section 3: Financial Structure */}
-          <Card title="3. Deal Structure" icon={<IndianRupee size={20} />}>
+        {/* 2. Measurement & Jantri (Top Right) */}
+        <div className="md:col-span-7">
+          <Card title="2. Measurement & Jantri" icon={<Ruler size={20} />} className="h-full">
             <div className="space-y-5">
               
-              {/* Deal Price */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Total Deal Price</label>
-                <input 
-                  type="number" 
-                  autoComplete="off"
-                  value={financials.totalDealPrice}
-                  onChange={e => setFinancials({...financials, totalDealPrice: e.target.value === '' ? '' : Number(e.target.value)})}
-                  className={`${inputClass} text-base font-bold text-white`}
-                  placeholder="0.00"
-                />
-              </div>
-
-              {/* Stamp Duty Section with Radio Buttons */}
-              <div className="bg-slate-800/50 p-3 rounded border border-slate-700">
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Stamp Duty Configuration</label>
-                
-                {/* Radio Buttons */}
-                <div className="flex gap-4 mb-3">
-                  <button 
-                    onClick={() => setOverheads({...overheads, stampDutyType: 'DealPrice'})}
-                    className={`flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full transition-all ${overheads.stampDutyType === 'DealPrice' ? 'bg-safety-600 text-white' : 'bg-slate-700 border border-slate-600 text-slate-300'}`}
-                  >
-                    {overheads.stampDutyType === 'DealPrice' ? <CheckCircle2 size={14} /> : <Circle size={14} />}
-                     Deal Price
-                  </button>
-                  <button 
-                    onClick={() => setOverheads({...overheads, stampDutyType: 'Jantri'})}
-                    className={`flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full transition-all ${overheads.stampDutyType === 'Jantri' ? 'bg-safety-600 text-white' : 'bg-slate-700 border border-slate-600 text-slate-300'}`}
-                  >
-                    {overheads.stampDutyType === 'Jantri' ? <CheckCircle2 size={14} /> : <Circle size={14} />}
-                     Jantri
-                  </button>
+              {/* Input & Basic Convert */}
+              <div className="grid grid-cols-12 gap-3 items-end">
+                <div className="col-span-8">
+                  <label className={labelClass}>Area Input</label>
+                  <input type="number" autoComplete="off" value={measurements.areaInput} onChange={e => setMeasurements({...measurements, areaInput: e.target.value === '' ? '' : Number(e.target.value)})} className={`${inputClass} text-lg font-bold text-safety-600`} placeholder="0.00" />
                 </div>
-
-                <div className="flex gap-4 items-center">
-                  <div className="w-24">
-                    <label className="text-[10px] text-slate-400 uppercase">Rate %</label>
-                    <input 
-                      type="number" 
-                      step="0.1"
-                      autoComplete="off"
-                      value={overheads.stampDutyPercent}
-                      onChange={e => setOverheads({...overheads, stampDutyPercent: e.target.value === '' ? '' : Number(e.target.value)})}
-                      className={inputClass}
-                      placeholder="4.9"
-                    />
-                  </div>
-                  <div className="flex-1 text-right">
-                    <label className="text-[10px] text-slate-400 uppercase block">Calculated Stamp Duty</label>
-                    <span className="text-sm font-bold text-white">{formatCurrency(calculatedStampDuty)}</span>
-                  </div>
+                <div className="col-span-4">
+                  <label className={labelClass}>Unit</label>
+                  <select value={measurements.inputUnit} onChange={e => setMeasurements({...measurements, inputUnit: e.target.value as UnitType})} className={selectClass}>
+                    <option value="SqMeter">Sq Mt</option>
+                    <option value="Vigha">Vigha</option>
+                    <option value="Vaar">Vaar</option>
+                    <option value="Guntha">Guntha</option>
+                    <option value="SqKm">Sq Km</option>
+                  </select>
                 </div>
               </div>
 
-              {/* Down Payment Section */}
-              <div className="bg-slate-800/50 p-3 rounded border border-slate-700">
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Token / Down Payment (%)</label>
-                <div className="flex gap-2 mb-2">
-                  {[10, 20, 30].map(pct => (
-                    <button
-                      key={pct}
-                      onClick={() => setFinancials({...financials, downPaymentPercent: pct})}
-                      className={`flex-1 py-1 px-2 text-sm rounded border transition-colors ${financials.downPaymentPercent === pct ? 'bg-safety-600 text-white border-safety-600' : 'bg-slate-700 text-slate-300 border-slate-600 hover:bg-slate-600'}`}
+              <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg flex items-center justify-between">
+                 <div className="flex items-center gap-2 text-slate-500 text-xs font-bold uppercase">
+                    <ArrowDown size={12} /> Converted
+                 </div>
+                 <div className="text-right">
+                    <span className="text-2xl font-mono font-bold text-slate-800 block leading-none mb-1">
+                       {result ? convertValue(result.inputInVigha, measurements.displayUnit).toFixed(2) : '0.00'}
+                    </span>
+                    <select 
+                      value={measurements.displayUnit}
+                      onChange={e => setMeasurements({...measurements, displayUnit: e.target.value as UnitType})}
+                      className="bg-transparent text-[10px] font-bold text-safety-600 outline-none text-right w-full cursor-pointer uppercase tracking-wider"
                     >
-                      {pct}%
-                    </button>
-                  ))}
-                  <div className="relative flex-1">
-                    <input 
-                      type="number"
-                      autoComplete="off"
-                      value={financials.downPaymentPercent}
-                      onChange={e => handlePercentChange(e.target.value)}
-                      className="w-full h-full text-center border border-slate-600 rounded text-sm focus:border-safety-500 outline-none bg-slate-700 text-white"
-                      placeholder="Custom"
-                    />
-                    <span className="absolute right-1 top-1 text-xs text-slate-400 pointer-events-none">%</span>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-400">Amount:</span>
-                  <span className="font-bold text-white">{formatCurrency(getNum(financials.totalDealPrice) * (getNum(financials.downPaymentPercent) / 100))}</span>
-                </div>
+                       <option value="Vigha">Vigha</option>
+                       <option value="SqMeter">Sq Mt</option>
+                       <option value="Vaar">Vaar</option>
+                       <option value="Guntha">Guntha</option>
+                    </select>
+                 </div>
               </div>
 
-              {/* Installments & Date */}
               <div className="grid grid-cols-2 gap-4">
-                 <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">No. of Installments</label>
-                    <input 
-                      type="number" 
-                      autoComplete="off"
-                      value={financials.numberOfInstallments}
-                      onChange={e => setFinancials({...financials, numberOfInstallments: e.target.value === '' ? '' : parseInt(e.target.value)})}
-                      className={inputClass}
-                      placeholder="e.g. 4"
-                    />
-                 </div>
-                 <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Purchase Date</label>
-                    <input 
-                      type="date"
-                      value={financials.purchaseDate}
-                      onChange={e => setFinancials({...financials, purchaseDate: e.target.value})}
-                      className={`${inputClass} [color-scheme:dark]`} 
-                    />
-                 </div>
-              </div>
-
-            </div>
-          </Card>
-
-           {/* Section 4: Additional Expenses */}
-           <Card title="4. Additional Expenses" icon={<Calculator size={20} />}>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Architect Fees</label>
-                <input 
-                  type="number" 
-                  autoComplete="off"
-                  value={overheads.architectFees}
-                  onChange={e => setOverheads({...overheads, architectFees: e.target.value === '' ? '' : Number(e.target.value)})}
-                  className={inputClass}
-                  placeholder="0.00"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Plan Pass Fees</label>
-                <input 
-                  type="number" 
-                  autoComplete="off"
-                  value={overheads.planPassFees}
-                  onChange={e => setOverheads({...overheads, planPassFees: e.target.value === '' ? '' : Number(e.target.value)})}
-                  className={inputClass}
-                  placeholder="0.00"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">NA Expense</label>
-                <input 
-                  type="number" 
-                  autoComplete="off"
-                  value={overheads.naExpense}
-                  onChange={e => setOverheads({...overheads, naExpense: e.target.value === '' ? '' : Number(e.target.value)})}
-                  className={inputClass}
-                  placeholder="0.00"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">NA Premium</label>
-                <input 
-                  type="number" 
-                  autoComplete="off"
-                  value={overheads.naPremium}
-                  onChange={e => setOverheads({...overheads, naPremium: e.target.value === '' ? '' : Number(e.target.value)})}
-                  className={inputClass}
-                  placeholder="0.00"
-                />
-              </div>
-            </div>
-          </Card>
-        </div>
-
-        {/* RIGHT COLUMN: OUTPUTS */}
-        <div className="lg:col-span-7 space-y-6">
-          
-          {/* Main "Invoice" Summary */}
-          <Card title="Project Cost Sheet" icon={<FileText size={20} />} className="border-t-4 border-t-safety-500">
-            {result && (
-              <div className="space-y-6">
-                
-                {/* Cost Breakdown */}
                 <div>
-                  <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 border-b border-slate-700 pb-1">Cost Summary</h4>
-                  <div className="grid grid-cols-2 gap-y-2 text-sm">
-                    <div className="text-slate-400">Total Deal Price</div>
-                    <div className="text-right font-semibold text-white">{formatCurrency(dealPrice)}</div>
-                    
-                    <div className="text-slate-400">
-                      Stamp Duty & Reg 
-                      <span className="text-[10px] text-slate-500 ml-1">
-                        ({overheads.stampDutyType === 'DealPrice' ? 'On Deal' : 'On Jantri'})
-                      </span>
-                    </div>
-                    <div className="text-right font-medium text-white">
-                      {formatCurrency(calculatedStampDuty)}
-                    </div>
+                  <label className={labelClass}>Jantri Rate (₹/SqMt)</label>
+                  <input type="number" autoComplete="off" value={measurements.jantriRate} onChange={e => setMeasurements({...measurements, jantriRate: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" />
+                </div>
+                <div className="flex flex-col justify-end">
+                   <div className="text-right">
+                      <div className="text-[10px] text-slate-400 font-bold uppercase">Total Jantri Value</div>
+                      <div className="text-lg font-bold text-slate-700">{formatCurrency(result?.totalJantriValue || 0)}</div>
+                   </div>
+                </div>
+              </div>
 
-                    <div className="text-slate-400">Additional Expenses</div>
-                    <div className="text-right font-medium text-white">{formatCurrency(result.totalAdditionalExpenses)}</div>
+              {/* Land Analysis Section */}
+              <div className="border-t border-slate-200 pt-4 mt-2">
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Land Analysis</h4>
+                  <select value={analysisUnit} onChange={e => setAnalysisUnit(e.target.value as UnitType)} className="bg-white border border-slate-300 text-slate-600 px-2 py-1 text-[10px] font-bold rounded shadow-sm outline-none">
+                      <option value="Vigha">Vigha</option>
+                      <option value="SqMeter">Sq Mt</option>
+                      <option value="Vaar">Vaar</option>
+                   </select>
+                </div>
 
-                    <div className="text-white font-semibold pt-2 border-t border-slate-700 mt-2">Total Project Cost</div>
-                    <div className="text-right font-semibold text-safety-500 pt-2 border-t border-slate-700 mt-2">{formatCurrency(result.landedCost)}</div>
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Total 100% */}
+                  <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
+                     <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">Total (100%)</div>
+                     <div className="text-base font-bold text-slate-800">{result ? convertValue(result.inputInVigha, analysisUnit).toFixed(2) : '0.00'} <span className="text-[10px] text-slate-400">{analysisUnit}</span></div>
+                     <div className="mt-2 pt-2 border-t border-slate-100 text-xs font-mono font-bold text-safety-600 block text-right">{formatCurrency(result?.totalJantriValue || 0)}</div>
+                  </div>
+                  {/* AP 60% */}
+                  <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                     <div className="text-[10px] text-blue-400 font-bold uppercase mb-1">AP Land (60%)</div>
+                     <div className="text-base font-bold text-slate-800">{result ? convertValue(result.apInVigha, analysisUnit).toFixed(2) : '0.00'} <span className="text-[10px] text-slate-400">{analysisUnit}</span></div>
+                     <div className="mt-2 pt-2 border-t border-blue-200 text-xs font-mono font-bold text-blue-600 block text-right">{formatCurrency(result?.apJantriValue || 0)}</div>
                   </div>
                 </div>
-
-                {/* Per Unit Costs */}
-                <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 grid grid-cols-2 gap-4">
-                   <div className="flex flex-col">
-                      <span className="text-xs text-slate-500">Cost per Sq Mt</span>
-                      <span className="text-lg font-bold text-white">{formatCurrency(result.finalProjectCostPerSqMt)}</span>
-                   </div>
-                   <div className="flex flex-col text-right">
-                      <span className="text-xs text-slate-500">Cost per Vigha</span>
-                      <span className="text-lg font-bold text-white">
-                        {formatCurrency(result.finalProjectCostPerSqMt * 2377.73)}
-                      </span>
-                   </div>
-                </div>
-
-                {/* Chart Section */}
-                <div className="border-t border-slate-700 pt-4">
-                  <h4 className="text-xs font-semibold text-center text-slate-500 mb-2">Cost Distribution</h4>
-                  <SummaryChart 
-                    landCost={dealPrice}
-                    stampDuty={calculatedStampDuty}
-                    development={result.totalAdditionalExpenses} 
-                  />
-                </div>
-
               </div>
-            )}
-          </Card>
 
-          {/* Payment Schedule Table */}
-          <Card title="Payment Schedule" icon={<CalendarDays size={20} />}>
-            {result && (
-              <div className="overflow-x-auto custom-scrollbar">
-                <div className="mb-4 flex gap-4 text-xs text-slate-300 bg-safety-900/20 p-2 rounded border border-safety-900/30">
-                  <span className="flex items-center gap-1 font-medium text-safety-500">
-                     Note:
-                  </span>
-                  <span>Jantri amount deducted from Installments & Paid at End.</span>
+            </div>
+          </Card>
+        </div>
+
+        {/* 3. Deal Structure (Middle Left) */}
+        <div className="md:col-span-6">
+          <Card title="3. Deal Structure" icon={<IndianRupee size={20} />} className="h-full">
+            <div className="space-y-6">
+              <div>
+                <label className={labelClass}>Total Deal Price</label>
+                <input type="number" autoComplete="off" value={financials.totalDealPrice} onChange={e => handleDealPriceChange(e.target.value)} className={`${inputClass} font-bold text-lg`} placeholder="0.00" />
+              </div>
+
+              <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                <label className={labelClass}>Token / Down Payment</label>
+                <div className="flex gap-4 items-center">
+                  <div className="w-24 relative">
+                     <input type="number" autoComplete="off" value={financials.downPaymentPercent} onChange={e => handleDpPercentChange(e.target.value)} className={`${inputClass} text-center pr-6 bg-white`} />
+                    <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-bold pointer-events-none">%</span>
+                  </div>
+                  <ArrowRightLeft size={16} className="text-slate-400" />
+                  <div className="flex-1 relative">
+                    <input type="number" autoComplete="off" value={financials.downPaymentAmount} onChange={e => handleDpAmountChange(e.target.value)} className={`${inputClass} text-right pr-6 font-bold bg-white`} />
+                    <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-bold pointer-events-none">₹</span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                 <label className={labelClass}>Payment Timeline</label>
+                 <div className="grid grid-cols-2 gap-4 mb-2">
+                   <input type="number" value={financials.totalDurationMonths} onChange={e => setFinancials({...financials, totalDurationMonths: e.target.value === '' ? '' : parseInt(e.target.value)})} className={inputClass} placeholder="Custom Months" />
+                   <select value={financials.installmentFrequency} onChange={e => setFinancials({...financials, installmentFrequency: parseInt(e.target.value)})} className={selectClass}>
+                      <option value={1}>Monthly</option>
+                      <option value={2}>Every 2 Months</option>
+                      <option value={3}>Quarterly</option>
+                      <option value={6}>Half-Yearly</option>
+                   </select>
+                 </div>
+                 <div className="flex gap-2 mb-3">
+                   {[12, 18, 24, 30, 36].map(m => (
+                     <button key={m} onClick={() => setFinancials({...financials, totalDurationMonths: m})} className={`px-3 py-1 text-xs font-bold rounded-md transition-all border ${financials.totalDurationMonths === m ? 'bg-safety-500 border-safety-500 text-white shadow-sm' : 'bg-white border-slate-300 text-slate-500 hover:bg-slate-50'}`}>{m} Mo</button>
+                   ))}
+                 </div>
+              </div>
+
+               <div>
+                  <label className={labelClass}>Purchase Date</label>
+                  <input 
+                    type="date" 
+                    value={financials.purchaseDate} 
+                    onChange={e => setFinancials({...financials, purchaseDate: e.target.value})} 
+                    className={`${inputClass} text-slate-900 [color-scheme:light]`}
+                  />
+               </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* 4. Project Expenses (Middle Right) */}
+        <div className="md:col-span-6">
+           <Card title="4. Project Expenses" icon={<Calculator size={20} />} className="h-full">
+            <div className="space-y-4">
+              <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200">
+                 <div className="text-xs font-bold text-slate-500">Stamp Duty (4.9% of Jantri)</div>
+                 <div className="font-mono font-bold text-slate-800">{formatCurrency(calculatedStampDuty)}</div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className={labelClass}>Architect Fees</label><input type="number" autoComplete="off" value={overheads.architectFees} onChange={e => setOverheads({...overheads, architectFees: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
+                <div><label className={labelClass}>Plan Pass Fees</label><input type="number" autoComplete="off" value={overheads.planPassFees} onChange={e => setOverheads({...overheads, planPassFees: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
+                <div><label className={labelClass}>NA Expense</label><input type="number" autoComplete="off" value={overheads.naExpense} onChange={e => setOverheads({...overheads, naExpense: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
+                <div><label className={labelClass}>NA Premium</label><input type="number" autoComplete="off" value={overheads.naPremium} onChange={e => setOverheads({...overheads, naPremium: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* 5. Project Cost Sheet Summary (Full Width) */}
+        <div className="md:col-span-12">
+          <Card title="5. Project Cost Sheet" icon={<FileText size={20} />}>
+            {result ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Left: Breakdown */}
+                <div className="flex flex-col justify-center">
+                  <div className="space-y-3 text-sm">
+                    <div className="flex justify-between border-b border-slate-100 pb-2">
+                      <div className="text-slate-500 font-medium">Total Deal Price</div>
+                      <div className="text-right font-bold text-slate-900">{formatCurrency(dealPrice)}</div>
+                    </div>
+                    
+                    <div className="flex justify-between border-b border-slate-100 pb-2">
+                      <div className="text-slate-500 font-medium">Stamp Duty & Registration</div>
+                      <div className="text-right font-bold text-slate-900">{formatCurrency(calculatedStampDuty)}</div>
+                    </div>
+
+                    <div className="pl-4 border-l-2 border-safety-200 space-y-1 bg-orange-50/50 p-3 rounded-r-lg">
+                      <div className="flex justify-between text-xs text-slate-600 mb-1"><span>Additional Expenses</span><span className="font-medium">{formatCurrency(result.totalAdditionalExpenses)}</span></div>
+                      {getNum(overheads.architectFees) > 0 && <div className="flex justify-between text-xs text-slate-400 pl-2"><span>- Architect</span><span>{formatCurrency(Number(overheads.architectFees))}</span></div>}
+                      {getNum(overheads.planPassFees) > 0 && <div className="flex justify-between text-xs text-slate-400 pl-2"><span>- Plan Pass</span><span>{formatCurrency(Number(overheads.planPassFees))}</span></div>}
+                      {getNum(overheads.naExpense) > 0 && <div className="flex justify-between text-xs text-slate-400 pl-2"><span>- NA Exp</span><span>{formatCurrency(Number(overheads.naExpense))}</span></div>}
+                      {getNum(overheads.naPremium) > 0 && <div className="flex justify-between text-xs text-slate-400 pl-2"><span>- NA Prem</span><span>{formatCurrency(Number(overheads.naPremium))}</span></div>}
+                    </div>
+
+                    {/* DARK THEME TOTAL COST BAR */}
+                    <div className="flex justify-between items-center bg-slate-900 p-4 rounded-lg mt-4 shadow-lg shadow-slate-200 border border-slate-800 relative overflow-hidden">
+                      <div className="absolute inset-0 bg-gradient-to-r from-slate-800 to-slate-900"></div>
+                      <div className="text-white font-bold text-lg relative z-10">Total Project Cost</div>
+                      <div className="text-right font-bold text-2xl text-slate-200 relative z-10">{formatCurrency(result.landedCost)}</div>
+                    </div>
+                  </div>
                 </div>
                 
-                <table className="w-full text-sm text-left border-collapse">
-                  <thead className="text-xs text-slate-500 uppercase bg-slate-800/50 border-b border-slate-700">
-                    <tr>
-                      <th className="px-4 py-3 font-medium text-left">Description</th>
-                      <th className="px-4 py-3 font-medium text-left">Due Date</th>
-                      <th className="px-4 py-3 font-medium text-right">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/50">
-                    {result.schedule.map((item) => (
-                      <tr key={item.id} className={`hover:bg-slate-800/30 transition-colors ${item.type === 'Jantri' ? 'bg-blue-900/10' : ''}`}>
-                        <td className="px-4 py-3 font-medium text-slate-300">
-                           {item.description}
-                        </td>
-                        <td className="px-4 py-3 text-slate-400 whitespace-nowrap">
-                          {item.date}
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium text-slate-200 font-mono">
-                          {formatCurrency(item.amount)}
-                        </td>
-                      </tr>
-                    ))}
-                    <tr className="bg-slate-800 text-white border-t border-slate-600">
-                      <td className="px-4 py-3 font-semibold" colSpan={2}>Grand Total (Deal Price)</td>
-                      <td className="px-4 py-3 text-right font-bold font-mono text-safety-500">
-                        {formatCurrency(result.grandTotalPayment)}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+                {/* Right: Pie Chart */}
+                <div className="flex items-center justify-center bg-slate-50/50 rounded-xl border border-slate-100 p-2 min-h-[300px]">
+                   <div className="w-full h-full flex flex-col">
+                      <div className="text-center text-[10px] font-bold text-slate-400 uppercase mb-2">Cost Distribution</div>
+                      <SummaryChart landCost={dealPrice} stampDuty={calculatedStampDuty} development={result.totalAdditionalExpenses} />
+                   </div>
+                </div>
               </div>
+            ) : (
+              <div className="text-center text-slate-400 py-8 italic">Enter details above to calculate cost sheet</div>
             )}
           </Card>
-
         </div>
+
+        {/* 6. Unit Costs (Full Width - Expanded) */}
+        {result && (
+          <div className="md:col-span-12">
+             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                 {['Sq Mt', 'Vaar', 'Vigha'].map((u, i) => (
+                   <div key={u} className="bg-white border border-slate-200 p-6 rounded-xl text-center shadow-sm flex flex-col justify-center">
+                      <div className="text-xs text-slate-400 font-bold uppercase mb-2 tracking-wider">Cost / {u}</div>
+                      <div className="text-2xl font-bold text-slate-800">{formatCurrency(i===0 ? result.costPerSqMt : i===1 ? result.costPerVaar : result.costPerVigha)}</div>
+                   </div>
+                 ))}
+             </div>
+          </div>
+        )}
+
+        {/* 7. Payment Schedule (Full Width) */}
+        <div className="md:col-span-12">
+          <Card title="7. Payment Schedule" icon={<CalendarDays size={20} />}>
+            {result ? (
+              <div className="flex flex-col h-full">
+                <div className="mb-6 bg-blue-50 border border-blue-100 p-4 rounded-lg flex justify-between items-center">
+                   <div>
+                     <span className="block text-xs text-blue-600 font-bold uppercase">Govt. Jantri Value</span>
+                     <span className="text-[10px] text-blue-400 font-semibold">Paid at Registry (Not in Deal Price)</span>
+                   </div>
+                   <div className="text-xl font-mono font-bold text-blue-700">{formatCurrency(result.totalJantriValue)}</div>
+                </div>
+                
+                <div className="overflow-hidden rounded-lg border border-slate-200">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-xs border-b border-slate-200">
+                      <tr>
+                        <th className="px-5 py-3">Description</th>
+                        <th className="px-5 py-3">Due Date</th>
+                        <th className="px-5 py-3 text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {result.schedule.map((item) => (
+                        <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="px-5 py-3 font-medium text-slate-700">{item.description}</td>
+                          <td className="px-5 py-3 text-slate-500 font-medium">{item.date}</td>
+                          <td className="px-5 py-3 text-right font-bold text-slate-700 font-mono">{formatCurrency(item.amount)}</td>
+                        </tr>
+                      ))}
+                      <tr className="bg-slate-50 font-bold border-t border-slate-200">
+                        <td className="px-5 py-4 text-slate-800" colSpan={2}>Total Payable to Land Owner</td>
+                        <td className="px-5 py-4 text-right text-safety-600 font-mono text-base">{formatCurrency(result.grandTotalPayment)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+               <div className="text-center text-slate-400 py-8 italic">Schedule will generate automatically</div>
+            )}
+          </Card>
+        </div>
+
       </main>
 
-      {/* --- PDF TEMPLATE (HIDDEN) --- */}
-      <div id="pdf-template" style={{ display: 'none', padding: '40px', fontFamily: 'Inter, sans-serif', backgroundColor: '#fff', color: '#111' }}>
-          <div style={{ textAlign: 'center', marginBottom: '30px', borderBottom: '2px solid #333', paddingBottom: '20px' }}>
-             <h1 style={{ fontSize: '28px', fontWeight: 'bold', margin: 0 }}>Land Deal Report</h1>
-             <p style={{ margin: '5px 0 0', color: '#666' }}>Generated on {formatDate(new Date())}</p>
+      {/* --- PDF TEMPLATE (HIDDEN: display: none) --- */}
+      <div id="pdf-template" style={{ display: 'none', width: '700px', backgroundColor: '#fff', color: '#111', fontFamily: 'sans-serif', fontSize: '11px', lineHeight: '1.4' }}>
+          
+          {/* PAGE 1: DETAILS & COST */}
+          <div className="page-1" style={{ padding: '40px', height: 'auto', minHeight: '950px' }}>
+            {/* Header */}
+            <div style={{ borderBottom: '2px solid #ea580c', paddingBottom: '15px', marginBottom: '25px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+               <div>
+                  <h1 style={{ fontSize: '22px', fontWeight: 'bold', margin: 0, color: '#1f2937' }}>LAND ACQUISITION REPORT</h1>
+                  <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px' }}>GDK NEXUS 2442 SYSTEM</p>
+               </div>
+               <div style={{ textAlign: 'right' }}>
+                 <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#374151' }}>{formatDate(new Date())}</div>
+               </div>
+            </div>
+
+            {/* Identity */}
+            <div style={{ marginBottom: '25px' }}>
+               <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #e5e7eb', paddingBottom: '5px', marginBottom: '10px', color: '#374151', textTransform: 'uppercase' }}>Land Identity</h3>
+               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <tbody>
+                    <tr><td style={{ padding: '6px', borderBottom: '1px solid #f3f4f6', width: '25%', color: '#6b7280' }}>Village</td><td style={{ padding: '6px', borderBottom: '1px solid #f3f4f6', fontWeight: 'bold' }}>{identity.village || '-'}</td><td style={{ padding: '6px', borderBottom: '1px solid #f3f4f6', width: '25%', color: '#6b7280' }}>Block / Survey</td><td style={{ padding: '6px', borderBottom: '1px solid #f3f4f6' }}>{identity.blockSurveyNumber || '-'}</td></tr>
+                    <tr><td style={{ padding: '6px', borderBottom: '1px solid #f3f4f6', color: '#6b7280' }}>TP Scheme</td><td style={{ padding: '6px', borderBottom: '1px solid #f3f4f6' }}>{identity.tpScheme || '-'}</td><td style={{ padding: '6px', borderBottom: '1px solid #f3f4f6', color: '#6b7280' }}>FP Number</td><td style={{ padding: '6px', borderBottom: '1px solid #f3f4f6' }}>{identity.fpNumber || '-'}</td></tr>
+                  </tbody>
+               </table>
+            </div>
+
+            {/* Measurements */}
+            <div style={{ marginBottom: '25px', backgroundColor: '#f9fafb', padding: '15px', borderRadius: '6px' }}>
+                <h3 style={{ fontSize: '13px', fontWeight: 'bold', marginBottom: '12px', color: '#374151', textTransform: 'uppercase' }}>Land Area & Jantri</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                   <div><div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase' }}>Input Area</div><div style={{ fontSize: '14px', fontWeight: 'bold' }}>{measurements.areaInput} {measurements.inputUnit}</div></div>
+                   <div><div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase' }}>In Vigha</div><div style={{ fontSize: '14px', fontWeight: 'bold' }}>{result ? convertValue(result.inputInVigha, 'Vigha').toFixed(2) : '-'}</div></div>
+                   <div><div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase' }}>In Sq Mt</div><div style={{ fontSize: '14px', fontWeight: 'bold' }}>{result?.totalSqMt.toFixed(2)}</div></div>
+                   <div><div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase' }}>Jantri Value</div><div style={{ fontSize: '14px', fontWeight: 'bold', color: '#2563eb' }}>{formatCurrency(result?.totalJantriValue || 0)}</div></div>
+                </div>
+            </div>
+
+            {result && (
+              <>
+                {/* Financials */}
+                <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #e5e7eb', paddingBottom: '5px', marginBottom: '10px', color: '#374151', textTransform: 'uppercase' }}>Project Cost Analysis</h3>
+                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '20px' }}>
+                   <tr style={{ backgroundColor: '#f3f4f6' }}>
+                     <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Description</th>
+                     <th style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Amount</th>
+                   </tr>
+                   <tr><td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Land Deal Price</td><td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold' }}>{formatCurrency(dealPrice)}</td></tr>
+                   <tr><td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Stamp Duty & Registration (4.9%)</td><td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #e5e7eb' }}>{formatCurrency(calculatedStampDuty)}</td></tr>
+                   
+                   {/* Detailed Breakdown for PDF */}
+                   {getNum(overheads.architectFees) > 0 && <tr><td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Architect Fees</td><td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #e5e7eb' }}>{formatCurrency(Number(overheads.architectFees))}</td></tr>}
+                   {getNum(overheads.planPassFees) > 0 && <tr><td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Plan Pass Fees</td><td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #e5e7eb' }}>{formatCurrency(Number(overheads.planPassFees))}</td></tr>}
+                   {getNum(overheads.naExpense) > 0 && <tr><td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>NA Expense</td><td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #e5e7eb' }}>{formatCurrency(Number(overheads.naExpense))}</td></tr>}
+                   {getNum(overheads.naPremium) > 0 && <tr><td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>NA Premium</td><td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #e5e7eb' }}>{formatCurrency(Number(overheads.naPremium))}</td></tr>}
+
+                   <tr style={{ backgroundColor: '#fff7ed' }}><td style={{ padding: '10px', fontWeight: 'bold', color: '#c2410c' }}>TOTAL LANDED COST</td><td style={{ padding: '10px', textAlign: 'right', fontWeight: 'bold', color: '#c2410c', fontSize: '13px' }}>{formatCurrency(result.landedCost)}</td></tr>
+                </table>
+
+                <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+                   <div style={{ flex: 1, padding: '12px', border: '1px solid #e5e7eb', borderRadius: '6px', textAlign: 'center' }}><div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase' }}>Cost / Sq Mt</div><div style={{ fontWeight: 'bold', fontSize: '14px' }}>{formatCurrency(result.costPerSqMt)}</div></div>
+                   <div style={{ flex: 1, padding: '12px', border: '1px solid #e5e7eb', borderRadius: '6px', textAlign: 'center' }}><div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase' }}>Cost / Vigha</div><div style={{ fontWeight: 'bold', fontSize: '14px' }}>{formatCurrency(result.costPerVigha)}</div></div>
+                </div>
+              </>
+            )}
           </div>
 
-          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '30px' }}>
-            <tbody>
-              <tr>
-                <td style={{ padding: '8px', borderBottom: '1px solid #ddd', fontWeight: 'bold', width: '30%' }}>Village</td>
-                <td style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>{identity.village || '-'}</td>
-                <td style={{ padding: '8px', borderBottom: '1px solid #ddd', fontWeight: 'bold', width: '30%' }}>Survey / Block</td>
-                <td style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>{identity.blockSurveyNumber || '-'}</td>
-              </tr>
-              <tr>
-                <td style={{ padding: '8px', borderBottom: '1px solid #ddd', fontWeight: 'bold' }}>TP Scheme</td>
-                <td style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>{identity.tpScheme || '-'}</td>
-                <td style={{ padding: '8px', borderBottom: '1px solid #ddd', fontWeight: 'bold' }}>FP Number</td>
-                <td style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>{identity.fpNumber || '-'}</td>
-              </tr>
-              <tr>
-                 <td style={{ padding: '8px', borderBottom: '1px solid #ddd', fontWeight: 'bold' }}>Total Area</td>
-                 <td style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>{measurements.areaSqMt} Sq. Mt</td>
-                 <td style={{ padding: '8px', borderBottom: '1px solid #ddd', fontWeight: 'bold' }}>In Vigha</td>
-                 <td style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>{result?.vighaEquivalent.toFixed(2)}</td>
-              </tr>
-            </tbody>
-          </table>
+          {/* PAGE BREAK */}
+          <div style={{ pageBreakBefore: 'always' }}></div>
 
-          {result && (
-            <>
-              <h3 style={{ fontSize: '18px', fontWeight: 'bold', borderBottom: '1px solid #000', paddingBottom: '5px', marginBottom: '15px' }}>Project Cost Breakdown</h3>
-              <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '30px', fontSize: '14px' }}>
-                <thead style={{ backgroundColor: '#f3f4f6' }}>
-                  <tr>
-                     <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>Component</th>
-                     <th style={{ padding: '10px', textAlign: 'right', border: '1px solid #ddd' }}>Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                   <tr>
-                     <td style={{ padding: '10px', border: '1px solid #ddd' }}>Total Deal Price</td>
-                     <td style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'right' }}>{formatCurrency(dealPrice)}</td>
-                   </tr>
-                   <tr>
-                     <td style={{ padding: '10px', border: '1px solid #ddd' }}>Stamp Duty ({overheads.stampDutyType === 'DealPrice' ? 'On Deal' : 'On Jantri'})</td>
-                     <td style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'right' }}>{formatCurrency(calculatedStampDuty)}</td>
-                   </tr>
-                   <tr>
-                     <td style={{ padding: '10px', border: '1px solid #ddd' }}>Additional Expenses (Arch, NA, etc.)</td>
-                     <td style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'right' }}>{formatCurrency(result.totalAdditionalExpenses)}</td>
-                   </tr>
-                   <tr style={{ backgroundColor: '#eef2ff', fontWeight: 'bold' }}>
-                     <td style={{ padding: '10px', border: '1px solid #ddd' }}>TOTAL PROJECT COST</td>
-                     <td style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'right' }}>{formatCurrency(result.landedCost)}</td>
-                   </tr>
-                   <tr>
-                     <td style={{ padding: '10px', border: '1px solid #ddd', color: '#666' }}>Effective Rate per Sq. Mt</td>
-                     <td style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'right', color: '#666' }}>{formatCurrency(result.finalProjectCostPerSqMt)}</td>
-                   </tr>
-                </tbody>
-              </table>
+          {/* PAGE 2: SCHEDULE */}
+          <div className="page-2" style={{ padding: '40px', height: 'auto' }}>
+             <div style={{ borderBottom: '2px solid #ea580c', paddingBottom: '10px', marginBottom: '25px' }}>
+                <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#1f2937' }}>PAYMENT SCHEDULE</h1>
+                <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '10px' }}>Installment Breakdown</p>
+             </div>
 
-              <h3 style={{ fontSize: '18px', fontWeight: 'bold', borderBottom: '1px solid #000', paddingBottom: '5px', marginBottom: '15px' }}>Payment Schedule</h3>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-                 <thead style={{ backgroundColor: '#f3f4f6' }}>
-                   <tr>
-                     <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>Due Date</th>
-                     <th style={{ padding: '10px', textAlign: 'left', border: '1px solid #ddd' }}>Description</th>
-                     <th style={{ padding: '10px', textAlign: 'right', border: '1px solid #ddd' }}>Amount</th>
-                   </tr>
-                 </thead>
-                 <tbody>
-                   {result.schedule.map(item => (
-                     <tr key={item.id}>
-                        <td style={{ padding: '10px', border: '1px solid #ddd' }}>{item.date}</td>
-                        <td style={{ padding: '10px', border: '1px solid #ddd' }}>{item.description}</td>
-                        <td style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'right' }}>{formatCurrency(item.amount)}</td>
+             {result && (
+               <>
+                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px' }}>
+                   <thead style={{ backgroundColor: '#f3f4f6' }}>
+                     <tr>
+                       <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e5e7eb' }}>#</th>
+                       <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e5e7eb' }}>Description</th>
+                       <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e5e7eb' }}>Due Date</th>
+                       <th style={{ padding: '8px', textAlign: 'right', borderBottom: '2px solid #e5e7eb' }}>Amount</th>
                      </tr>
-                   ))}
-                   <tr style={{ fontWeight: 'bold', backgroundColor: '#f9fafb' }}>
-                     <td style={{ padding: '10px', border: '1px solid #ddd' }} colSpan={2}>Grand Total</td>
-                     <td style={{ padding: '10px', border: '1px solid #ddd', textAlign: 'right' }}>{formatCurrency(result.grandTotalPayment)}</td>
-                   </tr>
-                 </tbody>
-              </table>
-            </>
-          )}
+                   </thead>
+                   <tbody>
+                     {result.schedule.map((item, i) => (
+                       <tr key={item.id}>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb', width: '30px' }}>{i+1}</td>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>{item.description}</td>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>{item.date}</td>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(item.amount)}</td>
+                       </tr>
+                     ))}
+                     <tr style={{ backgroundColor: '#f3f4f6', fontWeight: 'bold' }}>
+                       <td colSpan={3} style={{ padding: '10px', borderBottom: '1px solid #e5e7eb', textTransform: 'uppercase' }}>Total Payable to Land Owner</td>
+                       <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb', textAlign: 'right' }}>{formatCurrency(result.grandTotalPayment)}</td>
+                     </tr>
+                   </tbody>
+                 </table>
 
-          <div style={{ marginTop: '50px', fontSize: '12px', color: '#999', textAlign: 'center' }}>
-            <p>Generated by GDK NEXUS 2442</p>
+                 <div style={{ marginTop: '25px', padding: '15px', backgroundColor: '#eff6ff', border: '1px solid #dbeafe', borderRadius: '6px', fontSize: '10px' }}>
+                    <strong style={{ color: '#1e40af', display: 'block', marginBottom: '5px' }}>Important Notes:</strong>
+                    <ul style={{ margin: 0, paddingLeft: '15px', color: '#1e3a8a' }}>
+                       <li style={{ marginBottom: '3px' }}>The Govt. Jantri Value ({formatCurrency(result.totalJantriValue)}) is <strong>excluded</strong> from this schedule (Paid via Cheque at Registry).</li>
+                       <li>Installments are calculated after deducting the initial Down Payment window (90 Days).</li>
+                    </ul>
+                 </div>
+               </>
+             )}
           </div>
       </div>
     </div>

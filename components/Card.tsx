@@ -10,15 +10,19 @@ interface CardProps {
 
 export const Card: React.FC<CardProps> = ({ title, icon, children, className = '', action }) => {
   return (
-    <div className={`bg-slate-900/40 backdrop-blur-sm rounded-xl border border-white/5 overflow-hidden ${className}`}>
-      <div className="px-6 py-4 border-b border-white/5 flex justify-between items-center bg-white/5">
-        <div className="flex items-center gap-2">
-          {icon && <span className="text-safety-500">{icon}</span>}
-          <h3 className="font-semibold text-slate-200 tracking-wide">{title}</h3>
+    <div className={`neu-flat overflow-hidden p-6 ${className}`}>
+      <div className="flex justify-between items-center mb-6">
+        <div className="flex items-center gap-3">
+          {icon && (
+            <div className="neu-icon w-10 h-10 text-safety-500">
+              {icon}
+            </div>
+          )}
+          <h3 className="font-bold text-slate-700 text-lg">{title}</h3>
         </div>
         {action && <div>{action}</div>}
       </div>
-      <div className="p-6">
+      <div className="text-slate-600">
         {children}
       </div>
     </div>

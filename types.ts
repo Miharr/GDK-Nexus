@@ -1,3 +1,5 @@
+export type UnitType = 'SqMeter' | 'Vaar' | 'Vigha' | 'Guntha' | 'SqKm';
+
 export interface LandIdentity {
   tpScheme: string;
   fpNumber: string; 
@@ -6,22 +8,23 @@ export interface LandIdentity {
 }
 
 export interface Measurements {
-  areaSqMt: number | ''; // Allow empty string for input handling
-  jantriRate: number | '';
+  areaInput: number | '';
+  inputUnit: UnitType;
+  displayUnit: UnitType;
+  jantriRate: number | ''; // Rate per Sq Meter
 }
 
 export interface Financials {
-  totalDealPrice: number | ''; // Allow empty string
-  downPaymentPercent: number | ''; // Allow empty string for manual entry
-  downPaymentAmount: number; // Calculated
-  numberOfInstallments: number | ''; // Allow empty string
-  purchaseDate: string; // ISO Date string
+  totalDealPrice: number | ''; 
+  downPaymentPercent: number | ''; 
+  downPaymentAmount: number | ''; // Now bi-directional
+  totalDurationMonths: number | ''; // New duration field
+  installmentFrequency: number; // 1 = Monthly, 2 = Bi-monthly, etc.
+  purchaseDate: string;
 }
 
 export interface Overheads {
-  stampDutyType: 'DealPrice' | 'Jantri'; // New field for Radio Button selection
   stampDutyPercent: number | '';
-  stampDutyAmount: number; // Calculated
   architectFees: number | '';
   planPassFees: number | '';
   naExpense: number | '';
@@ -33,17 +36,28 @@ export interface PaymentScheduleItem {
   date: string;
   description: string;
   amount: number;
-  type: 'Token' | 'Installment' | 'Jantri';
+  type: 'Token' | 'Installment' | 'Jantri' | 'Total';
 }
 
 export interface CalculationResult {
   totalSqMt: number;
-  vighaEquivalent: number;
-  totalJantriValue: number;
+  apAreaSqMt: number; // 60%
+  
+  // Conversions for display
+  inputInVigha: number;
+  apInVigha: number;
+  
+  totalJantriValue: number; // On 100%
+  apJantriValue: number; // On 60%
+  
   totalAdditionalExpenses: number;
   landedCost: number; 
+  
   schedule: PaymentScheduleItem[];
   grandTotalPayment: number; 
-  landCostPerSqMt: number;
-  finalProjectCostPerSqMt: number;
+  
+  // Unit Costs
+  costPerSqMt: number;
+  costPerVaar: number;
+  costPerVigha: number;
 }

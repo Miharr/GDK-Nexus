@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 
 export const Loader: React.FC = () => {
   return (
-    <div className="flex flex-col items-center justify-center h-full w-full bg-slate-950 text-white">
+    <div className="flex flex-col items-center justify-center h-full w-full bg-[#EFEEEE] text-slate-800">
       <div className="relative w-48 h-48 mb-8">
         {/* Abstract Isometric Building Construction Animation */}
         <svg viewBox="0 0 100 100" className="w-full h-full stroke-safety-500 fill-none stroke-[2px]">
@@ -13,7 +13,7 @@ export const Loader: React.FC = () => {
             initial={{ pathLength: 0, opacity: 0 }}
             animate={{ pathLength: 1, opacity: 0.2 }}
             transition={{ duration: 1.5, ease: "easeInOut" }}
-            className="stroke-slate-600"
+            className="stroke-slate-300"
           />
           
           {/* Building Up - Animated Lines */}
@@ -22,6 +22,7 @@ export const Loader: React.FC = () => {
             initial={{ pathLength: 0 }}
             animate={{ pathLength: 1 }}
             transition={{ duration: 1.2, ease: "easeInOut", delay: 0.2 }}
+            className="stroke-safety-500"
           />
 
           {/* Top Hexagon completion */}
@@ -30,6 +31,7 @@ export const Loader: React.FC = () => {
              initial={{ pathLength: 0 }}
              animate={{ pathLength: 1 }}
              transition={{ duration: 0.8, ease: "easeInOut", delay: 0.8 }}
+             className="stroke-safety-500"
           />
           
           {/* Moving 'Crane' element */}
@@ -53,7 +55,7 @@ export const Loader: React.FC = () => {
           INITIALIZING
         </motion.div>
         <motion.div 
-          className="h-1 w-32 bg-slate-800 rounded-full overflow-hidden"
+          className="h-1 w-32 bg-slate-200 rounded-full overflow-hidden"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.8 }}
@@ -65,7 +67,7 @@ export const Loader: React.FC = () => {
             transition={{ duration: 1.5, ease: "easeInOut" }}
           />
         </motion.div>
-        <p className="text-slate-500 text-xs font-mono mt-2">GDK NEXUS 2442 SYSTEM</p>
+        <p className="text-slate-400 text-xs font-mono mt-2">GDK NEXUS 2442 SYSTEM</p>
       </div>
     </div>
   );
