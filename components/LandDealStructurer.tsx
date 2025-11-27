@@ -667,8 +667,8 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
                    </div>
                 </div>
                 
-                <div className="overflow-hidden rounded-lg border border-slate-200">
-                  <table className="w-full text-sm text-left">
+               <div className="overflow-x-auto rounded-lg border border-slate-200 pb-2">
+                  <table className="w-full text-sm text-left border-collapse min-w-[600px]">
                     <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-xs border-b border-slate-200">
                       <tr>
                         <th className="px-5 py-3">Description</th>
@@ -680,8 +680,8 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
                       {result.schedule.map((item) => (
                         <tr key={item.id} className="hover:bg-slate-50 transition-colors">
                           <td className="px-5 py-3 font-medium text-slate-700">{item.description}</td>
-                          <td className="px-5 py-3 text-slate-500 font-medium">{item.date}</td>
-                          <td className="px-5 py-3 text-right font-bold text-slate-700 font-mono">{formatCurrency(item.amount)}</td>
+                          <td className="px-5 py-3 text-slate-500 font-medium whitespace-nowrap">{item.date}</td>
+                          <td className="px-5 py-3 text-right font-bold text-slate-700 font-mono whitespace-nowrap">{formatCurrency(item.amount)}</td>
                         </tr>
                       ))}
                       <tr className="bg-slate-50 font-bold border-t border-slate-200">
