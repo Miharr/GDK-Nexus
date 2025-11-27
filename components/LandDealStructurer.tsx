@@ -28,7 +28,9 @@ import {
   formatCurrency, 
   formatDate, 
   addDays, 
-  addMonths 
+  addMonths,
+  formatInputNumber,
+  parseInputNumber
 } from '../utils/formatters';
 
 // Declare html2pdf for TypeScript
@@ -65,8 +67,9 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
   const [financials, setFinancials] = useState<Financials>({
     pricePerVigha: '', 
     totalDealPrice: 0, 
-    downPaymentPercent: '', // Default Empty
-    downPaymentAmount: '', // Default Empty
+    downPaymentPercent: '', 
+    downPaymentAmount: '', 
+    downPaymentDurationMonths: 3, 
     totalDurationMonths: 24, 
     numberOfInstallments: 4, 
     purchaseDate: new Date().toISOString().split('T')[0],
@@ -78,12 +81,10 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
     planPassFees: '',
     naExpense: '',
     naPremium: '',
-    developmentCost: '', // New field
+    developmentCost: '',
   });
 
-  // View Toggle State for Cost Sheet
   const [costSheetBasis, setCostSheetBasis] = useState<'100' | '60'>('100');
-
   const [result, setResult] = useState<CalculationResult | null>(null);
 
   // --- CALCULATION ENGINE ---
@@ -105,50 +106,48 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
     const fpAreaSqMt = totalSqMt * 0.60;
     const fpInVigha = valInVigha * 0.60;
 
-    // 3. Jantri Logic
+    // 3. Jantri
     const jantriRate = getNum(measurements.jantriRate);
     const totalJantriValue = totalSqMt * jantriRate;
     const fpJantriValue = fpAreaSqMt * jantriRate;
 
-    // 4. Deal Price Logic
+    // 4. Deal Price
     const pricePerVigha = getNum(financials.pricePerVigha);
     const calculatedDealPrice = pricePerVigha * valInVigha;
     
-    // 5. Financials
-    let effectiveDpAmount = getNum(financials.downPaymentAmount);
-    if (financials.downPaymentPercent !== '' && financials.downPaymentAmount === '') {
-       effectiveDpAmount = calculatedDealPrice * (Number(financials.downPaymentPercent) / 100);
-    }
+    // 5. Financials (Use State directly, handlers keep them synced)
+    const effectiveDpAmount = getNum(financials.downPaymentAmount);
 
-    // 6. Stamp Duty (Split Calculation)
+    // 6. Stamp Duty
     const stampPercent = getNum(overheads.stampDutyPercent);
     const stampDuty100 = totalJantriValue * (stampPercent / 100);
     const stampDuty60 = fpJantriValue * (stampPercent / 100);
 
-    // 7. Schedule Logic
+    // 7. Schedule
     const schedule: PaymentScheduleItem[] = [];
     const purchaseDateObj = new Date(financials.purchaseDate);
     const totalMonths = getNum(financials.totalDurationMonths);
     const numInstallments = getNum(financials.numberOfInstallments);
+    const dpDuration = financials.downPaymentDurationMonths;
 
-    const dpDueDate = addDays(purchaseDateObj, 90);
+    const dpDueDate = addMonths(purchaseDateObj, dpDuration);
     
     if (calculatedDealPrice > 0 || effectiveDpAmount > 0) {
       schedule.push({
         id: 1,
         date: formatDate(dpDueDate),
-        description: 'Down Payment (Day 90)',
+        description: `Down Payment (${dpDuration} Month Window)`,
         amount: effectiveDpAmount,
         type: 'Token'
       });
     }
 
     const balanceToPay = calculatedDealPrice - effectiveDpAmount;
-    const remainingDurationMonths = Math.max(0, totalMonths - 3);
+    const remainingDurationMonths = Math.max(0, totalMonths - dpDuration);
     
     if (balanceToPay > 0 && numInstallments > 0 && remainingDurationMonths > 0) {
       const amountPerInstallment = balanceToPay / numInstallments;
-      const startDate = addMonths(purchaseDateObj, 3);
+      const startDate = addMonths(purchaseDateObj, dpDuration);
       const endDate = addMonths(purchaseDateObj, totalMonths);
       const timeSpan = endDate.getTime() - startDate.getTime();
       const intervalMs = timeSpan / numInstallments;
@@ -156,7 +155,6 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
       for (let i = 1; i <= numInstallments; i++) {
         const dueDateMs = startDate.getTime() + (i * intervalMs);
         const dueDate = new Date(dueDateMs);
-
         schedule.push({
           id: i + 1,
           date: formatDate(dueDate),
@@ -175,22 +173,21 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
       getNum(overheads.naPremium) + 
       getNum(overheads.developmentCost);
 
-    // Landed Cost Scenarios
     const landedCost100 = calculatedDealPrice + stampDuty100 + totalAdditionalExpenses;
     const landedCost60 = calculatedDealPrice + stampDuty60 + totalAdditionalExpenses;
-
     const grandTotalPayment = schedule.reduce((sum, item) => sum + item.amount, 0);
 
-    // 9. Unit Costs (Defaulting to 100% Basis for general metrics, or we could toggle this too)
-    // For now, let's use 100% basis for unit costs as standard practice usually considers full stamp?
-    // Actually, if the user toggles to 60%, they likely want to see costs based on that scenario.
-    // However, types.ts only has one set of unit costs. I'll use the currently selected basis in the Render phase.
-    // Here I'll just store placeholders or calculate based on 100 for now, UI will handle display math.
+    // 9. Metric Calculations (100% & 60%)
+    const costPerSqMt100 = totalSqMt > 0 ? landedCost100 / totalSqMt : 0;
+    const costPerVaar100 = totalVaar > 0 ? landedCost100 / totalVaar : 0;
+    const costPerVigha100 = valInVigha > 0 ? landedCost100 / valInVigha : 0;
+
+    const fpVaar = totalVaar * 0.60;
+    const fpVigha = valInVigha * 0.60;
     
-    // Helper for UI math
-    const costPerSqMt = totalSqMt > 0 ? landedCost100 / totalSqMt : 0;
-    const costPerVaar = totalVaar > 0 ? landedCost100 / totalVaar : 0;
-    const costPerVigha = valInVigha > 0 ? landedCost100 / valInVigha : 0;
+    const costPerSqMt60 = fpAreaSqMt > 0 ? landedCost60 / fpAreaSqMt : 0;
+    const costPerVaar60 = fpVaar > 0 ? landedCost60 / fpVaar : 0;
+    const costPerVigha60 = fpVigha > 0 ? landedCost60 / fpVigha : 0;
 
     setResult({
       totalSqMt, fpAreaSqMt, inputInVigha: valInVigha, fpInVigha,
@@ -199,7 +196,8 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
       totalAdditionalExpenses, 
       landedCost100, landedCost60,
       schedule, grandTotalPayment, 
-      costPerSqMt, costPerVaar, costPerVigha // These are base 100% values
+      costPerSqMt100, costPerVaar100, costPerVigha100,
+      costPerSqMt60, costPerVaar60, costPerVigha60
     });
 
   }, [measurements, financials, overheads]);
@@ -208,7 +206,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
   const handleClear = () => {
     setIdentity({ village: '', tpScheme: '', fpNumber: '', blockSurveyNumber: '' });
     setMeasurements({ areaInput: '', inputUnit: 'SqMeter', displayUnit: 'Vigha', jantriRate: '' });
-    setFinancials({ pricePerVigha: '', totalDealPrice: 0, downPaymentPercent: '', downPaymentAmount: '', totalDurationMonths: 24, numberOfInstallments: 4, purchaseDate: new Date().toISOString().split('T')[0] });
+    setFinancials({ pricePerVigha: '', totalDealPrice: 0, downPaymentPercent: '', downPaymentAmount: '', downPaymentDurationMonths: 3, totalDurationMonths: 24, numberOfInstallments: 4, purchaseDate: new Date().toISOString().split('T')[0] });
     setOverheads({ stampDutyPercent: 4.9, architectFees: '', planPassFees: '', naExpense: '', naPremium: '', developmentCost: '' });
     setAnalysisUnit('Vigha');
     setCostSheetBasis('100');
@@ -231,13 +229,33 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
     });
   };
 
+  // Reactive Handlers
   const handlePricePerVighaChange = (val: string) => {
-    const price = val === '' ? '' : Number(val);
-    setFinancials(prev => ({ ...prev, pricePerVigha: price }));
+    const rawPrice = parseInputNumber(val);
+    
+    // Recalculate Deal Price for immediate dependent updates
+    let vighaArea = 0;
+    const inputArea = Number(measurements.areaInput);
+    if (measurements.inputUnit === 'Vigha') vighaArea = inputArea;
+    else vighaArea = inputArea / CONVERSION_RATES[measurements.inputUnit];
+
+    const newDealPrice = (rawPrice === '' ? 0 : rawPrice) * vighaArea;
+
+    // Update DP Amount if PCT is set
+    const pct = Number(financials.downPaymentPercent);
+    const newDpAmount = (financials.downPaymentPercent !== '' && rawPrice !== '') 
+      ? newDealPrice * (pct / 100) 
+      : (financials.downPaymentAmount === '' ? '' : Number(financials.downPaymentAmount));
+
+    setFinancials(prev => ({ 
+      ...prev, 
+      pricePerVigha: rawPrice,
+      downPaymentAmount: newDpAmount === '' ? '' : parseFloat(newDpAmount.toFixed(2))
+    }));
   };
 
   const handleDpPercentChange = (val: string) => {
-    const pct = val === '' ? '' : Number(val);
+    const pct = parseInputNumber(val);
     const totalDeal = (Number(financials.pricePerVigha) || 0) * (result?.inputInVigha || 0);
     const amt = pct !== '' ? totalDeal * (pct / 100) : '';
     
@@ -249,7 +267,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
   };
 
   const handleDpAmountChange = (val: string) => {
-    const amt = val === '' ? '' : Number(val);
+    const amt = parseInputNumber(val);
     const totalDeal = (Number(financials.pricePerVigha) || 0) * (result?.inputInVigha || 0);
     let pct: number | '' = '';
     if (totalDeal > 0 && amt !== '') {
@@ -260,17 +278,17 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
 
   const getNum = (val: number | string) => (val === '' ? 0 : Number(val));
   const calculatedDealPrice = getNum(financials.pricePerVigha) * (result?.inputInVigha || 0);
+  const calculatedStampDuty = (result?.totalJantriValue || 0) * (getNum(overheads.stampDutyPercent) / 100);
   const convertValue = (valInVigha: number, unit: UnitType) => valInVigha * CONVERSION_RATES[unit];
 
-  // Dynamic Values based on Toggle
+  // Dynamic Values
   const currentStampDuty = result ? (costSheetBasis === '100' ? result.stampDuty100 : result.stampDuty60) : 0;
   const currentLandedCost = result ? (costSheetBasis === '100' ? result.landedCost100 : result.landedCost60) : 0;
   const currentJantriDisplay = result ? (costSheetBasis === '100' ? result.totalJantriValue : result.fpJantriValue) : 0;
 
-  // Recalculate unit costs for display based on currentLandedCost
-  const displayCostPerSqMt = result && result.totalSqMt > 0 ? currentLandedCost / result.totalSqMt : 0;
-  const displayCostPerVaar = result && result.inputInVigha > 0 ? currentLandedCost / (result.inputInVigha * CONVERSION_RATES.Vaar) : 0;
-  const displayCostPerVigha = result && result.inputInVigha > 0 ? currentLandedCost / result.inputInVigha : 0;
+  const displayCostPerSqMt = result ? (costSheetBasis === '100' ? result.costPerSqMt100 : result.costPerSqMt60) : 0;
+  const displayCostPerVaar = result ? (costSheetBasis === '100' ? result.costPerVaar100 : result.costPerVaar60) : 0;
+  const displayCostPerVigha = result ? (costSheetBasis === '100' ? result.costPerVigha100 : result.costPerVigha60) : 0;
 
   // Styles
   const labelClass = "block text-xs font-semibold text-slate-500 uppercase mb-1 ml-1";
@@ -419,9 +437,9 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
               <div>
                 <label className={labelClass}>Price Per Vigha</label>
                 <input 
-                  type="number" 
+                  type="text" 
                   autoComplete="off" 
-                  value={financials.pricePerVigha} 
+                  value={formatInputNumber(financials.pricePerVigha)} 
                   onChange={e => handlePricePerVighaChange(e.target.value)} 
                   className={`${inputClass} font-bold text-lg text-safety-600`} 
                   placeholder="Enter Rate" 
@@ -438,7 +456,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
                 <div className="flex gap-4 items-center">
                   <div className="w-24 relative">
                      <input 
-                        type="number" 
+                        type="text" 
                         autoComplete="off" 
                         value={financials.downPaymentPercent} 
                         onChange={e => handleDpPercentChange(e.target.value)} 
@@ -450,15 +468,34 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
                   <ArrowRightLeft size={16} className="text-slate-400" />
                   <div className="flex-1 relative">
                     <input 
-                        type="number" 
+                        type="text" 
                         autoComplete="off" 
-                        value={financials.downPaymentAmount} 
+                        value={formatInputNumber(financials.downPaymentAmount)} 
                         onChange={e => handleDpAmountChange(e.target.value)} 
                         className={`${inputClass} text-right pr-6 font-bold bg-slate-50`} 
                         placeholder=""
                     />
                     <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-bold pointer-events-none">₹</span>
                   </div>
+                </div>
+                
+                {/* DP Duration Slider */}
+                <div className="mt-4">
+                   <div className="flex justify-between mb-2">
+                      <label className="text-[10px] text-slate-400 font-bold uppercase">DP Duration</label>
+                      <span className="text-xs font-bold text-slate-800">{financials.downPaymentDurationMonths} Months</span>
+                   </div>
+                   <input 
+                      type="range" 
+                      min="0" 
+                      max="5" 
+                      value={financials.downPaymentDurationMonths} 
+                      onChange={e => setFinancials({...financials, downPaymentDurationMonths: parseInt(e.target.value)})}
+                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-safety-500"
+                   />
+                   <div className="flex justify-between text-[9px] text-slate-400 mt-1">
+                      <span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
+                   </div>
                 </div>
               </div>
 
@@ -481,7 +518,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
                    </div>
                  </div>
                  <div className="text-[10px] text-safety-600 mt-2 flex items-center gap-1 font-bold ml-1">
-                    <Clock size={10} /> Schedule: 90 Day DP + Remaining over (Months - 3)
+                    <Clock size={10} /> Schedule starts after DP window
                  </div>
               </div>
 
@@ -577,7 +614,6 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
                       {getNum(overheads.developmentCost) > 0 && <div className="flex justify-between text-xs text-slate-400 pl-2"><span>- Dev Cost</span><span>{formatCurrency(Number(overheads.developmentCost))}</span></div>}
                     </div>
 
-                    {/* DARK THEME TOTAL COST BAR */}
                     <div className="flex justify-between items-center bg-slate-900 p-4 rounded-lg mt-4 shadow-lg shadow-slate-300 border border-slate-800 relative overflow-hidden">
                       <div className="absolute inset-0 bg-slate-900"></div>
                       <div className="text-white font-bold text-lg relative z-10">Total Project Cost</div>
@@ -600,7 +636,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
           </Card>
         </div>
 
-        {/* 6. Unit Costs (Full Width) */}
+        {/* 6. Unit Costs */}
         {result && (
           <div className="md:col-span-12">
              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -667,9 +703,10 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
       {/* --- PDF TEMPLATE --- */}
       <div id="pdf-template" style={{ display: 'none', width: '700px', backgroundColor: '#fff', color: '#111', fontFamily: 'sans-serif', fontSize: '11px', lineHeight: '1.4' }}>
           
-          {/* PAGE 1 */}
+          {/* PAGE 1: DETAILS & COST */}
           <div className="page-1" style={{ padding: '40px', height: 'auto', minHeight: '950px' }}>
-            {/* Header */}
+            
+            {/* HEADER */}
             <div style={{ borderBottom: '2px solid #ea580c', paddingBottom: '15px', marginBottom: '25px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                <div>
                   <h1 style={{ fontSize: '22px', fontWeight: 'bold', margin: 0, color: '#1f2937' }}>LAND ACQUISITION REPORT</h1>
@@ -680,53 +717,135 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
                </div>
             </div>
 
-            {/* Identity */}
-            <div style={{ marginBottom: '25px' }}>
-               <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #e5e7eb', paddingBottom: '5px', marginBottom: '10px', color: '#374151', textTransform: 'uppercase' }}>Land Identity</h3>
-               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <tbody>
-                    <tr><td style={{ padding: '6px', borderBottom: '1px solid #f3f4f6', width: '25%', color: '#6b7280' }}>Village</td><td style={{ padding: '6px', borderBottom: '1px solid #f3f4f6', fontWeight: 'bold' }}>{identity.village || '-'}</td><td style={{ padding: '6px', borderBottom: '1px solid #f3f4f6', width: '25%', color: '#6b7280' }}>Block / Survey</td><td style={{ padding: '6px', borderBottom: '1px solid #f3f4f6' }}>{identity.blockSurveyNumber || '-'}</td></tr>
-                    <tr><td style={{ padding: '6px', borderBottom: '1px solid #f3f4f6', color: '#6b7280' }}>TP Scheme</td><td style={{ padding: '6px', borderBottom: '1px solid #f3f4f6' }}>{identity.tpScheme || '-'}</td><td style={{ padding: '6px', borderBottom: '1px solid #f3f4f6', color: '#6b7280' }}>FP Number</td><td style={{ padding: '6px', borderBottom: '1px solid #f3f4f6' }}>{identity.fpNumber || '-'}</td></tr>
-                  </tbody>
-               </table>
+            {/* PROMINENT IDENTITY (NEW) */}
+            <div style={{ marginBottom: '30px', padding: '15px', backgroundColor: '#f3f4f6', borderLeft: '4px solid #f97316', borderRadius: '4px' }}>
+               <h2 style={{ fontSize: '16px', fontWeight: 'bold', margin: '0 0 8px 0', color: '#1f2937' }}>
+                  {identity.village || 'Village Name'} 
+                  <span style={{ fontWeight: 'normal', fontSize: '12px', color: '#6b7280', marginLeft: '10px' }}>(TP: {identity.tpScheme || '-'})</span>
+               </h2>
+               <div style={{ display: 'flex', gap: '20px', fontSize: '12px', color: '#4b5563' }}>
+                  <div><strong>FP Number:</strong> {identity.fpNumber || '-'}</div>
+                  <div><strong>Block / Survey:</strong> {identity.blockSurveyNumber || '-'}</div>
+               </div>
             </div>
 
-            {/* Measurements */}
-            <div style={{ marginBottom: '25px', backgroundColor: '#f9fafb', padding: '15px', borderRadius: '6px' }}>
-                <h3 style={{ fontSize: '13px', fontWeight: 'bold', marginBottom: '12px', color: '#374151', textTransform: 'uppercase' }}>Land Area & Jantri</h3>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                   <div><div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase' }}>Input Area</div><div style={{ fontSize: '14px', fontWeight: 'bold' }}>{measurements.areaInput} {measurements.inputUnit}</div></div>
-                   <div><div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase' }}>In Vigha</div><div style={{ fontSize: '14px', fontWeight: 'bold' }}>{result ? convertValue(result.inputInVigha, 'Vigha').toFixed(2) : '-'}</div></div>
-                   <div><div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase' }}>FP Jantri</div><div style={{ fontSize: '14px', fontWeight: 'bold', color: '#2563eb' }}>{formatCurrency(result?.fpJantriValue || 0)}</div></div>
-                </div>
+            {/* SECTION A: LAND ANALYSIS (COMPARISON TABLE) */}
+            <div style={{ marginBottom: '30px' }}>
+                <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #e5e7eb', paddingBottom: '5px', marginBottom: '10px', color: '#374151', textTransform: 'uppercase' }}>Section A: Land Analysis</h3>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                   <thead style={{ backgroundColor: '#f3f4f6' }}>
+                      <tr>
+                         <th style={{ textAlign: 'left', padding: '8px' }}>Metric</th>
+                         <th style={{ textAlign: 'right', padding: '8px' }}>Total Land (100%)</th>
+                         <th style={{ textAlign: 'right', padding: '8px' }}>FP Land (60%)</th>
+                      </tr>
+                   </thead>
+                   <tbody>
+                      <tr>
+                         <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Area (Sq Mt)</td>
+                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold' }}>{result?.totalSqMt.toFixed(2)}</td>
+                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#2563eb' }}>{result?.fpAreaSqMt.toFixed(2)}</td>
+                      </tr>
+                      <tr>
+                         <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Area (Vigha)</td>
+                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold' }}>{result ? convertValue(result.inputInVigha, 'Vigha').toFixed(2) : '-'}</td>
+                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#2563eb' }}>{result ? convertValue(result.fpInVigha, 'Vigha').toFixed(2) : '-'}</td>
+                      </tr>
+                      <tr>
+                         <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Jantri Value</td>
+                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold' }}>{formatCurrency(result?.totalJantriValue || 0)}</td>
+                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#2563eb' }}>{formatCurrency(result?.fpJantriValue || 0)}</td>
+                      </tr>
+                      <tr>
+                         <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Stamp Duty ({overheads.stampDutyPercent}%)</td>
+                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold' }}>{formatCurrency(result?.stampDuty100 || 0)}</td>
+                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#2563eb' }}>{formatCurrency(result?.stampDuty60 || 0)}</td>
+                      </tr>
+                   </tbody>
+                </table>
             </div>
 
             {result && (
               <>
-                {/* Financials */}
-                <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #e5e7eb', paddingBottom: '5px', marginBottom: '10px', color: '#374151', textTransform: 'uppercase' }}>Project Cost Analysis ({costSheetBasis}%)</h3>
-                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '20px' }}>
-                   <tr style={{ backgroundColor: '#f3f4f6' }}>
-                     <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Description</th>
-                     <th style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Amount</th>
-                   </tr>
-                   <tr><td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Land Deal Price</td><td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold' }}>{formatCurrency(calculatedDealPrice)}</td></tr>
-                   <tr><td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Stamp Duty & Registration</td><td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #e5e7eb' }}>{formatCurrency(currentStampDuty)}</td></tr>
-                   
-                   {/* Detailed Breakdown */}
-                   {getNum(overheads.architectFees) > 0 && <tr><td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Architect Fees</td><td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #e5e7eb' }}>{formatCurrency(Number(overheads.architectFees))}</td></tr>}
-                   {getNum(overheads.planPassFees) > 0 && <tr><td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Plan Pass Fees</td><td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #e5e7eb' }}>{formatCurrency(Number(overheads.planPassFees))}</td></tr>}
-                   {getNum(overheads.naExpense) > 0 && <tr><td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>NA Expense</td><td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #e5e7eb' }}>{formatCurrency(Number(overheads.naExpense))}</td></tr>}
-                   {getNum(overheads.naPremium) > 0 && <tr><td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>NA Premium</td><td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #e5e7eb' }}>{formatCurrency(Number(overheads.naPremium))}</td></tr>}
-                   {getNum(overheads.developmentCost) > 0 && <tr><td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Development Cost</td><td style={{ padding: '8px', textAlign: 'right', borderBottom: '1px solid #e5e7eb' }}>{formatCurrency(Number(overheads.developmentCost))}</td></tr>}
-
-                   <tr style={{ backgroundColor: '#fff7ed' }}><td style={{ padding: '10px', fontWeight: 'bold', color: '#c2410c' }}>TOTAL LANDED COST</td><td style={{ padding: '10px', textAlign: 'right', fontWeight: 'bold', color: '#c2410c', fontSize: '13px' }}>{formatCurrency(currentLandedCost)}</td></tr>
-                </table>
-
-                <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
-                   <div style={{ flex: 1, padding: '12px', border: '1px solid #e5e7eb', borderRadius: '6px', textAlign: 'center' }}><div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase' }}>Cost / Sq Mt</div><div style={{ fontWeight: 'bold', fontSize: '14px' }}>{formatCurrency(displayCostPerSqMt)}</div></div>
-                   <div style={{ flex: 1, padding: '12px', border: '1px solid #e5e7eb', borderRadius: '6px', textAlign: 'center' }}><div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase' }}>Cost / Vigha</div><div style={{ fontWeight: 'bold', fontSize: '14px' }}>{formatCurrency(displayCostPerVigha)}</div></div>
+                {/* SECTION B: DEAL STRUCTURE */}
+                <div style={{ marginBottom: '30px' }}>
+                   <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #e5e7eb', paddingBottom: '5px', marginBottom: '10px', color: '#374151', textTransform: 'uppercase' }}>Section B: Deal Structure</h3>
+                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                      <tr>
+                         <td style={{ padding: '6px 0', borderBottom: '1px solid #f3f4f6', color: '#6b7280' }}>Price Per Vigha</td>
+                         <td style={{ fontWeight: 'bold', textAlign: 'right', borderBottom: '1px solid #f3f4f6' }}>{formatCurrency(Number(financials.pricePerVigha))}</td>
+                      </tr>
+                      <tr>
+                         <td style={{ padding: '6px 0', borderBottom: '1px solid #f3f4f6', color: '#6b7280' }}>Total Deal Price</td>
+                         <td style={{ fontWeight: 'bold', textAlign: 'right', borderBottom: '1px solid #f3f4f6' }}>{formatCurrency(calculatedDealPrice)}</td>
+                      </tr>
+                      <tr>
+                         <td style={{ padding: '6px 0', borderBottom: '1px solid #f3f4f6', color: '#6b7280' }}>Down Payment</td>
+                         <td style={{ fontWeight: 'bold', textAlign: 'right', borderBottom: '1px solid #f3f4f6' }}>
+                            {formatCurrency(Number(financials.downPaymentAmount))} ({financials.downPaymentPercent}%)
+                         </td>
+                      </tr>
+                      <tr>
+                         <td style={{ padding: '6px 0', borderBottom: '1px solid #f3f4f6', color: '#6b7280' }}>Payment Duration</td>
+                         <td style={{ fontWeight: 'bold', textAlign: 'right', borderBottom: '1px solid #f3f4f6' }}>
+                            {financials.totalDurationMonths} Months (DP Window: {financials.downPaymentDurationMonths} Mo)
+                         </td>
+                      </tr>
+                      <tr>
+                         <td style={{ padding: '6px 0', borderBottom: '1px solid #f3f4f6', color: '#6b7280' }}>Installments</td>
+                         <td style={{ fontWeight: 'bold', textAlign: 'right', borderBottom: '1px solid #f3f4f6' }}>
+                            {financials.numberOfInstallments} Payments
+                         </td>
+                      </tr>
+                   </table>
                 </div>
+
+                {/* SECTION C: COST METRICS COMPARISON */}
+                <div style={{ marginBottom: '30px' }}>
+                   <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #e5e7eb', paddingBottom: '5px', marginBottom: '10px', color: '#374151', textTransform: 'uppercase' }}>Section C: Cost Metrics Comparison</h3>
+                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                      <thead style={{ backgroundColor: '#f3f4f6' }}>
+                         <tr>
+                            <th style={{ textAlign: 'left', padding: '8px' }}>Metric</th>
+                            <th style={{ textAlign: 'right', padding: '8px' }}>On 100% Area</th>
+                            <th style={{ textAlign: 'right', padding: '8px' }}>On 60% Area</th>
+                         </tr>
+                      </thead>
+                      <tbody>
+                         <tr>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Cost per Sq Mt</td>
+                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold' }}>{formatCurrency(result.costPerSqMt100)}</td>
+                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#2563eb' }}>{formatCurrency(result.costPerSqMt60)}</td>
+                         </tr>
+                         <tr>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Cost per Vigha</td>
+                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold' }}>{formatCurrency(result.costPerVigha100)}</td>
+                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#2563eb' }}>{formatCurrency(result.costPerVigha60)}</td>
+                         </tr>
+                         <tr>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Cost per Vaar</td>
+                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold' }}>{formatCurrency(result.costPerVaar100)}</td>
+                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#2563eb' }}>{formatCurrency(result.costPerVaar60)}</td>
+                         </tr>
+                      </tbody>
+                   </table>
+                </div>
+
+                {/* SECTION D (PART 1): EXPENSES */}
+                <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #e5e7eb', paddingBottom: '5px', marginBottom: '10px', color: '#374151', textTransform: 'uppercase' }}>Section D: Expense Breakdown</h3>
+                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '10px', fontSize: '11px' }}>
+                   {/* We only show Expenses that contribute to cost. Stamp Duty is dynamic based on context, but usually reported on 100% in breakdown unless specified. Let's show the 100% Stamp for the base cost sheet in PDF, or clarify it varies. The user asked for detailed breakdown. Let's list the 100% Stamp Duty as standard reference or explicitly state it. Since cost metrics compare both, let's show 100% here as base. */}
+                   <tr><td style={{ padding: '6px 0' }}>Stamp Duty (100% Basis)</td><td style={{ textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(result.stampDuty100)}</td></tr>
+                   {getNum(overheads.architectFees) > 0 && <tr><td style={{ padding: '6px 0' }}>Architect Fees</td><td style={{ textAlign: 'right' }}>{formatCurrency(Number(overheads.architectFees))}</td></tr>}
+                   {getNum(overheads.planPassFees) > 0 && <tr><td style={{ padding: '6px 0' }}>Plan Pass Fees</td><td style={{ textAlign: 'right' }}>{formatCurrency(Number(overheads.planPassFees))}</td></tr>}
+                   {getNum(overheads.naExpense) > 0 && <tr><td style={{ padding: '6px 0' }}>NA Expense</td><td style={{ textAlign: 'right' }}>{formatCurrency(Number(overheads.naExpense))}</td></tr>}
+                   {getNum(overheads.naPremium) > 0 && <tr><td style={{ padding: '6px 0' }}>NA Premium</td><td style={{ textAlign: 'right' }}>{formatCurrency(Number(overheads.naPremium))}</td></tr>}
+                   {getNum(overheads.developmentCost) > 0 && <tr><td style={{ padding: '6px 0' }}>Development Cost</td><td style={{ textAlign: 'right' }}>{formatCurrency(Number(overheads.developmentCost))}</td></tr>}
+                   <tr style={{ backgroundColor: '#fff7ed', borderTop: '1px solid #fdba74' }}>
+                      <td style={{ padding: '8px', fontWeight: 'bold', color: '#c2410c' }}>TOTAL PROJECT COST (100% Basis)</td>
+                      <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold', color: '#c2410c' }}>{formatCurrency(result.landedCost100)}</td>
+                   </tr>
+                </table>
               </>
             )}
           </div>
@@ -734,7 +853,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
           {/* PAGE BREAK */}
           <div style={{ pageBreakBefore: 'always' }}></div>
 
-          {/* PAGE 2 */}
+          {/* PAGE 2: SCHEDULE */}
           <div className="page-2" style={{ padding: '40px', height: 'auto' }}>
              <div style={{ borderBottom: '2px solid #ea580c', paddingBottom: '10px', marginBottom: '25px' }}>
                 <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#1f2937' }}>PAYMENT SCHEDULE</h1>
@@ -771,8 +890,8 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
                  <div style={{ marginTop: '25px', padding: '15px', backgroundColor: '#eff6ff', border: '1px solid #dbeafe', borderRadius: '6px', fontSize: '10px' }}>
                     <strong style={{ color: '#1e40af', display: 'block', marginBottom: '5px' }}>Important Notes:</strong>
                     <ul style={{ margin: 0, paddingLeft: '15px', color: '#1e3a8a' }}>
-                       <li style={{ marginBottom: '3px' }}>The Govt. Jantri Value ({formatCurrency(currentJantriDisplay)}) is <strong>excluded</strong> from this schedule (Paid via Cheque at Registry).</li>
-                       <li>Installments are calculated after deducting the initial Down Payment window (90 Days).</li>
+                       <li style={{ marginBottom: '3px' }}>The Govt. Jantri Value ({formatCurrency(result.totalJantriValue)}) is <strong>excluded</strong> from this schedule (Paid via Cheque at Registry).</li>
+                       <li>Installments are calculated after deducting the initial Down Payment window ({financials.downPaymentDurationMonths} Months).</li>
                     </ul>
                  </div>
                </>

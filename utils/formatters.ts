@@ -35,3 +35,16 @@ export const addDays = (date: Date, days: number): Date => {
   newDate.setDate(newDate.getDate() + days);
   return newDate;
 };
+
+// New helpers for Text Inputs
+export const formatInputNumber = (val: number | ''): string => {
+  if (val === '') return '';
+  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(val);
+};
+
+export const parseInputNumber = (val: string): number | '' => {
+  // Remove commas and non-numeric chars (except dot)
+  const clean = val.replace(/,/g, '');
+  if (clean === '' || isNaN(Number(clean))) return '';
+  return Number(clean);
+};
