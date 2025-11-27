@@ -13,6 +13,7 @@ import {
   ArrowLeft,
   Clock,
   ArrowDown,
+  CheckCircle,
   Save
 } from 'lucide-react';
 import { Card } from './Card';
@@ -91,6 +92,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
 
   const [costSheetBasis, setCostSheetBasis] = useState<'100' | '60'>('100');
   const [result, setResult] = useState<CalculationResult | null>(null);
+  const [showSaveSuccess, setShowSaveSuccess] = useState(false);
 
   // --- HYDRATION EFFECT ---
   useEffect(() => {
@@ -221,14 +223,38 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
 
   // --- HANDLERS ---
   const handleClear = () => {
-    if(!window.confirm('Are you sure you want to clear all fields?')) return;
+    // Reset all states immediately without confirmation dialog
     setIdentity({ village: '', tpScheme: '', fpNumber: '', blockSurveyNumber: '' });
     setMeasurements({ areaInput: '', inputUnit: 'SqMeter', displayUnit: 'Vigha', jantriRate: '' });
-    setFinancials({ pricePerVigha: '', totalDealPrice: 0, downPaymentPercent: '', downPaymentAmount: '', downPaymentDurationMonths: 3, totalDurationMonths: 24, numberOfInstallments: 4, purchaseDate: new Date().toISOString().split('T')[0] });
-    setOverheads({ stampDutyPercent: 4.9, architectFees: '', planPassFees: '', naExpense: '', naPremium: '', developmentCost: '' });
+    
+    // Reset financials to default
+    setFinancials({ 
+      pricePerVigha: '', 
+      totalDealPrice: 0, 
+      downPaymentPercent: '', 
+      downPaymentAmount: '', 
+      downPaymentDurationMonths: 3, 
+      totalDurationMonths: 24, 
+      numberOfInstallments: 4, 
+      purchaseDate: new Date().toISOString().split('T')[0] 
+    });
+
+    // Reset overheads
+    setOverheads({ 
+      stampDutyPercent: 4.9, 
+      architectFees: '', 
+      planPassFees: '', 
+      naExpense: '', 
+      naPremium: '', 
+      developmentCost: '' 
+    });
+
     setAnalysisUnit('Vigha');
     setCostSheetBasis('100');
     setResult(null);
+    
+    // Optional: Scroll to top
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleSaveProject = async () => {
@@ -252,8 +278,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
         costSheetBasis
     };
 
-    const projectName = prompt('Enter a name for this project:', `${identity.village} Deal`);
-    if (!projectName) return;
+   const projectName = `${identity.village || 'Project'} - TP ${identity.tpScheme || '-'} - FP ${identity.fpNumber || '-'}`;
 
     try {
         const { error } = await supabase.from('projects').insert({
@@ -264,7 +289,11 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
         });
 
         if (error) throw error;
-        alert('Project saved successfully!');
+        
+        // Trigger Silent Success Animation
+        setShowSaveSuccess(true);
+        setTimeout(() => setShowSaveSuccess(false), 2000); // Hide after 2 seconds
+
     } catch (err: any) {
         console.error(err);
         alert(`Failed to save project: ${err.message || 'Unknown error'}`);
@@ -769,7 +798,16 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
 
       </main>
 
-
+      {/* Success Notification Overlay */}
+      {showSaveSuccess && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+          <div className="bg-emerald-500 text-white px-6 py-4 rounded-2xl shadow-2xl flex flex-col items-center gap-2 animate-in zoom-in duration-300">
+            <CheckCircle size={32} strokeWidth={3} />
+            <span className="font-bold text-lg">Saved Successfully</span>
+          </div>
+        </div>
+      )}
+      
       <div id="pdf-template" style={{ display: 'none', width: '700px', backgroundColor: '#fff', color: '#000000', fontFamily: 'sans-serif', fontSize: '11px', lineHeight: '1.5' }}>
           
           <div style={{ padding: '40px' }}>

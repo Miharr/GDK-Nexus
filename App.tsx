@@ -31,7 +31,7 @@ const App: React.FC = () => {
     // Simulate system loading time
     setTimeout(() => {
       setCurrentView(view);
-    }, 1200);
+    }, 1100);
   };
 
   const handleBackToDash = () => {

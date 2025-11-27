@@ -56,22 +56,28 @@ export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject }) => {
   };
 
   const handleDelete = async (id: number) => {
-    if (!supabase) return;
-    if (!window.confirm('Are you sure you want to delete this project permanently?')) return;
+    // 1. Confirm deletion (Optional: Remove this line if you want no confirmation)
+
+    // 2. Optimistic Update: Remove from UI immediately so it feels fast
+    const previousProjects = [...projects];
+    setProjects(prev => prev.filter(p => p.id !== id));
 
     try {
+      // 3. Send Delete Command to Database
       const { error } = await supabase
         .from('projects')
         .delete()
         .eq('id', id);
 
-      if (error) throw error;
-      
-      // Update local state
-      setProjects(prev => prev.filter(p => p.id !== id));
-    } catch (err) {
-      console.error('Error deleting project:', err);
-      alert('Failed to delete project.');
+      // 4. Handle Permission/Database Errors
+      if (error) {
+        throw error;
+      }
+    } catch (err: any) {
+      // 5. Rollback: If database failed (e.g. Permission denied), put the item back
+      console.error('Delete failed:', err);
+      setProjects(previousProjects); 
+      alert(`Delete failed: ${err.message}`);
     }
   };
 
@@ -145,14 +151,14 @@ export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject }) => {
           </div>
         ) : (
           <div className="space-y-4">
-            {filteredProjects.map((project) => (
-              <div key={project.id} className="neu-flat p-5 flex flex-col md:flex-row gap-4 justify-between items-start md:items-center transition-all hover:translate-y-[-2px]">
+            {filteredProjects.map((project, index) => (
+              <div key={project.id} className="bg-white border border-slate-200 shadow-sm rounded-xl p-5 flex flex-col md:flex-row gap-4 justify-between items-start md:items-center transition-all hover:shadow-md">
                 
                 {/* Project Info */}
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
                     <h3 className="text-lg font-bold text-slate-800">{project.project_name || 'Untitled Project'}</h3>
-                    <span className="text-xs bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full font-mono">ID: {project.id}</span>
+                    <span className="text-xs bg-slate-100 text-slate-400 px-2 py-0.5 rounded font-mono">#{index + 1}</span>
                   </div>
                   
                   <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-500 mt-2">
@@ -172,18 +178,18 @@ export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject }) => {
                 </div>
 
                 {/* Actions */}
-                <div className="flex items-center gap-3 w-full md:w-auto pt-4 md:pt-0 border-t md:border-0 border-slate-200">
+                <div className="flex items-center gap-3 w-full md:w-auto pt-4 md:pt-0 border-t md:border-0 border-slate-100">
                   <button 
                     onClick={() => handleLoad(project)}
                     type="button"
-                    className="neu-btn-primary flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2"
+                    className="bg-blue-50 text-blue-600 hover:bg-blue-100 flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
                   >
                     <FolderOpen size={16} /> Open
                   </button>
                   <button 
                     onClick={() => handleDelete(project.id)}
                     type="button"
-                    className="neu-btn text-red-500 flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 hover:bg-red-50"
+                    className="text-red-400 hover:text-red-600 hover:bg-red-50 flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
                   >
                     <Trash2 size={16} /> Delete
                   </button>

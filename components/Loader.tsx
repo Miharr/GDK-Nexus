@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 
 export const Loader: React.FC = () => {
   return (
-    <div className="flex flex-col items-center justify-center h-full w-full bg-[#EFEEEE] text-slate-800">
+    <div className="flex flex-col items-center justify-center h-full w-full bg-[#F1F5F9] text-slate-800">
       <div className="relative w-48 h-48 mb-8">
         {/* Abstract Isometric Building Construction Animation */}
         <svg viewBox="0 0 100 100" className="w-full h-full stroke-safety-500 fill-none stroke-[2px]">
@@ -64,7 +64,7 @@ export const Loader: React.FC = () => {
             className="h-full bg-safety-500"
             initial={{ width: 0 }}
             animate={{ width: "100%" }}
-            transition={{ duration: 1.5, ease: "easeInOut" }}
+            transition={{ duration: 0.8, ease: "easeInOut" }}
           />
         </motion.div>
         <p className="text-slate-400 text-xs font-mono mt-2">GDK NEXUS 2442 SYSTEM</p>
