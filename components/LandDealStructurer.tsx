@@ -434,15 +434,15 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
               </div>
               <div>
                 <label className={labelClass}>TP Scheme</label>
-                <input type="text" autoComplete="off" value={identity.tpScheme} onChange={e => setIdentity({...identity, tpScheme: e.target.value})} className={inputClass} placeholder="TP-1" />
+                <input type="text" inputMode="decimal" autoComplete="off" value={identity.tpScheme} onChange={e => setIdentity({...identity, tpScheme: e.target.value})} className={inputClass} placeholder="TP-1" />
               </div>
               <div>
                 <label className={labelClass}>FP Number</label>
-                <input type="text" autoComplete="off" value={identity.fpNumber} onChange={e => setIdentity({...identity, fpNumber: e.target.value})} className={inputClass} placeholder="FP-101" />
+                <input type="text" inputMode="decimal" autoComplete="off" value={identity.fpNumber} onChange={e => setIdentity({...identity, fpNumber: e.target.value})} className={inputClass} placeholder="FP-101" />
               </div>
               <div className="col-span-2">
                 <label className={labelClass}>Block / Survey</label>
-                <input type="text" autoComplete="off" value={identity.blockSurveyNumber} onChange={e => setIdentity({...identity, blockSurveyNumber: e.target.value})} className={inputClass} placeholder="123 / 45" />
+                <input type="text" inputMode="decimal" autoComplete="off" value={identity.blockSurveyNumber} onChange={e => setIdentity({...identity, blockSurveyNumber: e.target.value})} className={inputClass} placeholder="123 / 45" />
               </div>
             </div>
           </Card>
@@ -455,7 +455,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
               <div className="grid grid-cols-12 gap-3 items-end">
                 <div className="col-span-8">
                   <label className={labelClass}>Area Input</label>
-                  <input type="number" autoComplete="off" value={measurements.areaInput} onChange={e => setMeasurements({...measurements, areaInput: e.target.value === '' ? '' : Number(e.target.value)})} className={`${inputClass} text-lg font-bold text-safety-600`} placeholder="0.00" />
+                  <input type="number" inputMode="decimal" autoComplete="off" value={measurements.areaInput} onChange={e => setMeasurements({...measurements, areaInput: e.target.value === '' ? '' : Number(e.target.value)})} className={`${inputClass} text-lg font-bold text-safety-600`} placeholder="0.00" />
                 </div>
                 <div className="col-span-4">
                   <label className={labelClass}>Unit</label>
@@ -493,7 +493,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
               <div className="grid grid-cols-1">
                 <div>
                   <label className={labelClass}>Jantri Rate (₹/SqMt)</label>
-                  <input type="number" autoComplete="off" value={measurements.jantriRate} onChange={e => setMeasurements({...measurements, jantriRate: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" />
+                  <input type="number" inputMode="decimal" autoComplete="off" value={measurements.jantriRate} onChange={e => setMeasurements({...measurements, jantriRate: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" />
                 </div>
               </div>
 
@@ -536,6 +536,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
                 <label className={labelClass}>Price Per Vigha</label>
                 <input 
                   type="text" 
+                  inputMode="decimal"
                   autoComplete="off" 
                   value={formatInputNumber(financials.pricePerVigha)} 
                   onChange={e => handlePricePerVighaChange(e.target.value)} 
@@ -555,6 +556,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
                   <div className="w-24 relative">
                      <input 
                         type="text" 
+                        inputMode="decimal"
                         autoComplete="off" 
                         value={financials.downPaymentPercent} 
                         onChange={e => handleDpPercentChange(e.target.value)} 
@@ -567,6 +569,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
                   <div className="flex-1 relative">
                     <input 
                         type="text" 
+                        inputMode="decimal"
                         autoComplete="off" 
                         value={formatInputNumber(financials.downPaymentAmount)} 
                         onChange={e => handleDpAmountChange(e.target.value)} 
@@ -602,12 +605,13 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
                  <div className="grid grid-cols-2 gap-4 mb-2">
                    <div>
                       <label className="text-[10px] text-slate-400 uppercase ml-1">Total Months</label>
-                      <input type="number" value={financials.totalDurationMonths} onChange={e => setFinancials({...financials, totalDurationMonths: e.target.value === '' ? '' : parseInt(e.target.value)})} className={inputClass} placeholder="Months" />
+                      <input type="number" inputMode="decimal" value={financials.totalDurationMonths} onChange={e => setFinancials({...financials, totalDurationMonths: e.target.value === '' ? '' : parseInt(e.target.value)})} className={inputClass} placeholder="Months" />
                    </div>
                    <div>
                       <label className="text-[10px] text-slate-400 uppercase ml-1">Installments</label>
                       <input 
                         type="number" 
+                        inputMode="decimal"
                         value={financials.numberOfInstallments} 
                         onChange={e => setFinancials({...financials, numberOfInstallments: e.target.value === '' ? '' : parseInt(e.target.value)})} 
                         className={inputClass} 
@@ -644,6 +648,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
                  <div className="flex items-center gap-2 bg-white border border-slate-300 rounded px-2 py-1">
                     <input 
                       type="number" 
+                      inputMode="decimal"
                       step="0.1"
                       value={overheads.stampDutyPercent} 
                       onChange={e => setOverheads({...overheads, stampDutyPercent: e.target.value === '' ? '' : Number(e.target.value)})} 
@@ -666,10 +671,10 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <div><label className={labelClass}>Architect Fees</label><input type="number" autoComplete="off" value={overheads.architectFees} onChange={e => setOverheads({...overheads, architectFees: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
-                <div><label className={labelClass}>Plan Pass Fees</label><input type="number" autoComplete="off" value={overheads.planPassFees} onChange={e => setOverheads({...overheads, planPassFees: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
-                <div><label className={labelClass}>NA Expense</label><input type="number" autoComplete="off" value={overheads.naExpense} onChange={e => setOverheads({...overheads, naExpense: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
-                <div><label className={labelClass}>NA Premium</label><input type="number" autoComplete="off" value={overheads.naPremium} onChange={e => setOverheads({...overheads, naPremium: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
+                <div><label className={labelClass}>Architect Fees</label><input type="number" inputMode="decimal" autoComplete="off" value={overheads.architectFees} onChange={e => setOverheads({...overheads, architectFees: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
+                <div><label className={labelClass}>Plan Pass Fees</label><input type="number" inputMode="decimal" autoComplete="off" value={overheads.planPassFees} onChange={e => setOverheads({...overheads, planPassFees: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
+                <div><label className={labelClass}>NA Expense</label><input type="number" inputMode="decimal" autoComplete="off" value={overheads.naExpense} onChange={e => setOverheads({...overheads, naExpense: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
+                <div><label className={labelClass}>NA Premium</label><input type="number" inputMode="decimal" autoComplete="off" value={overheads.naPremium} onChange={e => setOverheads({...overheads, naPremium: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
                 <div className="col-span-2"><label className={labelClass}>Development Cost</label><input type="number" autoComplete="off" value={overheads.developmentCost} onChange={e => setOverheads({...overheads, developmentCost: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
               </div>
             </div>
