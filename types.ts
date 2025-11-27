@@ -73,3 +73,23 @@ export interface CalculationResult {
   costPerVaar60: number;
   costPerVigha60: number;
 }
+
+// --- NEW TYPES FOR PROJECT HISTORY ---
+
+export interface ProjectSavedState {
+  identity: LandIdentity;
+  measurements: Measurements;
+  financials: Financials;
+  overheads: Overheads;
+  analysisUnit: UnitType;
+  costSheetBasis: '100' | '60';
+}
+
+export interface ProjectRow {
+  id: number;
+  created_at: string;
+  project_name: string;
+  village_name: string;
+  total_land_cost: number;
+  full_data: ProjectSavedState;
+}

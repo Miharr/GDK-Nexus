@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { 
   Building2, 
@@ -11,7 +12,8 @@ import {
   ArrowRightLeft,
   ArrowLeft,
   Clock,
-  ArrowDown
+  ArrowDown,
+  Save
 } from 'lucide-react';
 import { Card } from './Card';
 import { SummaryChart } from './SummaryChart';
@@ -22,7 +24,8 @@ import {
   Overheads, 
   CalculationResult, 
   PaymentScheduleItem,
-  UnitType
+  UnitType,
+  ProjectSavedState
 } from '../types';
 import { 
   formatCurrency, 
@@ -32,6 +35,7 @@ import {
   formatInputNumber,
   parseInputNumber
 } from '../utils/formatters';
+import { supabase } from '../supabaseClient';
 
 // Declare html2pdf for TypeScript
 declare var html2pdf: any;
@@ -46,9 +50,10 @@ const CONVERSION_RATES = {
 
 interface Props {
   onBack: () => void;
+  initialData?: ProjectSavedState;
 }
 
-export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
+export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => {
   
   // --- STATE ---
   const [identity, setIdentity] = useState<LandIdentity>({
@@ -86,6 +91,18 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
 
   const [costSheetBasis, setCostSheetBasis] = useState<'100' | '60'>('100');
   const [result, setResult] = useState<CalculationResult | null>(null);
+
+  // --- HYDRATION EFFECT ---
+  useEffect(() => {
+    if (initialData) {
+      setIdentity(initialData.identity);
+      setMeasurements(initialData.measurements);
+      setFinancials(initialData.financials);
+      setOverheads(initialData.overheads);
+      setAnalysisUnit(initialData.analysisUnit);
+      setCostSheetBasis(initialData.costSheetBasis);
+    }
+  }, [initialData]);
 
   // --- CALCULATION ENGINE ---
   useEffect(() => {
@@ -204,6 +221,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
 
   // --- HANDLERS ---
   const handleClear = () => {
+    if(!window.confirm('Are you sure you want to clear all fields?')) return;
     setIdentity({ village: '', tpScheme: '', fpNumber: '', blockSurveyNumber: '' });
     setMeasurements({ areaInput: '', inputUnit: 'SqMeter', displayUnit: 'Vigha', jantriRate: '' });
     setFinancials({ pricePerVigha: '', totalDealPrice: 0, downPaymentPercent: '', downPaymentAmount: '', downPaymentDurationMonths: 3, totalDurationMonths: 24, numberOfInstallments: 4, purchaseDate: new Date().toISOString().split('T')[0] });
@@ -213,17 +231,65 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
     setResult(null);
   };
 
-  const handleDownloadPDF = () => {
+  const handleSaveProject = async () => {
+    // 1. Safety check for Supabase
+    if (!supabase) {
+      alert("Database connection is not initialized. Please check Supabase configuration.");
+      return;
+    }
+
+    if (!identity.village) {
+        alert('Please enter a Village Name to save the project.');
+        return;
+    }
+
+    const projectData: ProjectSavedState = {
+        identity,
+        measurements,
+        financials,
+        overheads,
+        analysisUnit,
+        costSheetBasis
+    };
+
+    const projectName = prompt('Enter a name for this project:', `${identity.village} Deal`);
+    if (!projectName) return;
+
+    try {
+        const { error } = await supabase.from('projects').insert({
+            project_name: projectName,
+            village_name: identity.village,
+            total_land_cost: result ? (costSheetBasis === '100' ? result.landedCost100 : result.landedCost60) : 0,
+            full_data: projectData
+        });
+
+        if (error) throw error;
+        alert('Project saved successfully!');
+    } catch (err: any) {
+        console.error(err);
+        alert(`Failed to save project: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+ const handleDownloadPDF = () => {
     const element = document.getElementById('pdf-template');
     if (!element) return;
+    
+    // Ensure specific print styles are applied
     element.style.display = 'block'; 
+    
+    const villageName = identity.village ? identity.village.replace(/\s+/g, '_') : 'Village';
+    const fpNumber = identity.fpNumber ? identity.fpNumber.replace(/\s+/g, '') : 'FP';
+
     const opt = {
-      margin: 0.25,
-      filename: `LandDeal_${identity.village || 'Report'}.pdf`,
-      image: { type: 'jpeg', quality: 1 },
-      html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
+      margin: [0.3, 0.3, 0.3, 0.3], // Top, Left, Bottom, Right
+      filename: `GDK_NEXUS_${villageName}_FP${fpNumber}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, letterRendering: true },
+      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } // Smart pagination avoids cutting tables/text
     };
+
     html2pdf().set(opt).from(element).save().then(() => {
        element.style.display = 'none'; 
     });
@@ -302,7 +368,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
       <header className="bg-white border-b border-slate-200 py-4 px-4 md:px-8 shadow-sm sticky top-0 z-30">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-4">
-             <button onClick={onBack} className="w-10 h-10 rounded-full flex items-center justify-center bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">
+             <button onClick={onBack} type="button" className="w-10 h-10 rounded-full flex items-center justify-center bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">
                 <ArrowLeft size={20} />
              </button>
             <div>
@@ -313,10 +379,13 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={handleClear} className="px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 flex items-center gap-2 transition-colors">
+             <button onClick={handleSaveProject} type="button" className="bg-slate-800 text-white px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 shadow hover:bg-slate-900 transition-all">
+               <Save size={16} /> <span className="hidden md:inline">Save</span>
+             </button>
+            <button onClick={handleClear} type="button" className="px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 flex items-center gap-2 transition-colors">
               <RotateCcw size={16} /> <span className="hidden md:inline">Clear</span>
             </button>
-            <button onClick={handleDownloadPDF} className="bg-safety-500 hover:bg-safety-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 shadow-md shadow-safety-200 transition-all">
+            <button onClick={handleDownloadPDF} type="button" className="bg-safety-500 hover:bg-safety-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 shadow-md shadow-safety-200 transition-all">
               <Download size={16} /> PDF
             </button>
           </div>
@@ -585,8 +654,8 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
             icon={<FileText size={20} />}
             action={
                 <div className="flex bg-slate-100 rounded-lg p-1">
-                   <button onClick={() => setCostSheetBasis('100')} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${costSheetBasis === '100' ? 'bg-white shadow text-slate-800' : 'text-slate-400'}`}>100%</button>
-                   <button onClick={() => setCostSheetBasis('60')} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${costSheetBasis === '60' ? 'bg-white shadow text-blue-600' : 'text-slate-400'}`}>60%</button>
+                   <button onClick={() => setCostSheetBasis('100')} type="button" className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${costSheetBasis === '100' ? 'bg-white shadow text-slate-800' : 'text-slate-400'}`}>100%</button>
+                   <button onClick={() => setCostSheetBasis('60')} type="button" className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${costSheetBasis === '60' ? 'bg-white shadow text-blue-600' : 'text-slate-400'}`}>60%</button>
                 </div>
             }
           >
@@ -700,66 +769,56 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
 
       </main>
 
-      {/* --- PDF TEMPLATE --- */}
-      <div id="pdf-template" style={{ display: 'none', width: '700px', backgroundColor: '#fff', color: '#111', fontFamily: 'sans-serif', fontSize: '11px', lineHeight: '1.4' }}>
+
+      <div id="pdf-template" style={{ display: 'none', width: '700px', backgroundColor: '#fff', color: '#000000', fontFamily: 'sans-serif', fontSize: '11px', lineHeight: '1.5' }}>
           
-          {/* PAGE 1: DETAILS & COST */}
-          <div className="page-1" style={{ padding: '40px', height: 'auto', minHeight: '950px' }}>
+          <div style={{ padding: '40px' }}>
             
-            {/* HEADER */}
+            {/* 1. HEADER */}
             <div style={{ borderBottom: '2px solid #ea580c', paddingBottom: '15px', marginBottom: '25px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                <div>
-                  <h1 style={{ fontSize: '22px', fontWeight: 'bold', margin: 0, color: '#1f2937' }}>LAND ACQUISITION REPORT</h1>
-                  <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px' }}>GDK NEXUS 2442 SYSTEM</p>
+                  <h1 style={{ fontSize: '22px', fontWeight: 'bold', margin: 0, color: '#000000' }}>LAND ACQUISITION REPORT</h1>
+                  <p style={{ margin: '4px 0 0', color: '#333333', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px' }}>GDK NEXUS 2442</p>
                </div>
-               <div style={{ textAlign: 'right' }}>
-                 <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#374151' }}>{formatDate(new Date())}</div>
-               </div>
-            </div>
-
-            {/* PROMINENT IDENTITY (NEW) */}
-            <div style={{ marginBottom: '30px', padding: '15px', backgroundColor: '#f3f4f6', borderLeft: '4px solid #f97316', borderRadius: '4px' }}>
-               <h2 style={{ fontSize: '16px', fontWeight: 'bold', margin: '0 0 8px 0', color: '#1f2937' }}>
-                  {identity.village || 'Village Name'} 
-                  <span style={{ fontWeight: 'normal', fontSize: '12px', color: '#6b7280', marginLeft: '10px' }}>(TP: {identity.tpScheme || '-'})</span>
-               </h2>
-               <div style={{ display: 'flex', gap: '20px', fontSize: '12px', color: '#4b5563' }}>
-                  <div><strong>FP Number:</strong> {identity.fpNumber || '-'}</div>
-                  <div><strong>Block / Survey:</strong> {identity.blockSurveyNumber || '-'}</div>
+                <div style={{ textAlign: 'right' }}>
+                 <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#000000' }}>{formatDate(new Date())}</div>
+                 <div style={{ fontSize: '9px', color: '#333333', marginTop: '4px', whiteSpace: 'nowrap' }}>
+                    Village: {identity.village || '-'} | TP Scheme: {identity.tpScheme || '-'} | Block No: {identity.blockSurveyNumber || '-'} | FP No: {identity.fpNumber || '-'}
+                 </div>
                </div>
             </div>
 
-            {/* SECTION A: LAND ANALYSIS (COMPARISON TABLE) */}
-            <div style={{ marginBottom: '30px' }}>
-                <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #e5e7eb', paddingBottom: '5px', marginBottom: '10px', color: '#374151', textTransform: 'uppercase' }}>Section A: Land Analysis</h3>
+            {/* 2. SECTION A: LAND ANALYSIS (COMPARISON) */}
+            <div style={{ marginBottom: '30px', pageBreakInside: 'avoid' }}>
+                <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #9ca3af', paddingBottom: '5px', marginBottom: '10px', color: '#000000', textTransform: 'uppercase' }}>A. Land Analysis</h3>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-                   <thead style={{ backgroundColor: '#f3f4f6' }}>
+                   <thead style={{ backgroundColor: '#f3f4f6', color: '#000000' }}>
                       <tr>
-                         <th style={{ textAlign: 'left', padding: '8px' }}>Metric</th>
-                         <th style={{ textAlign: 'right', padding: '8px' }}>Total Land (100%)</th>
-                         <th style={{ textAlign: 'right', padding: '8px' }}>FP Land (60%)</th>
+                         <th style={{ textAlign: 'left', padding: '8px', width: '30%' }}>Metric</th>
+                         <th style={{ textAlign: 'right', padding: '8px', width: '35%' }}>Total Land (100%)</th>
+                         <th style={{ textAlign: 'right', padding: '8px', width: '35%' }}>FP Land (60%)</th>
                       </tr>
                    </thead>
                    <tbody>
                       <tr>
-                         <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Area (Sq Mt)</td>
-                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold' }}>{result?.totalSqMt.toFixed(2)}</td>
-                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#2563eb' }}>{result?.fpAreaSqMt.toFixed(2)}</td>
+                         <td style={{ padding: '8px', borderBottom: '1px solid #9ca3af' }}>Area (Sq Mt)</td>
+                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #9ca3af', fontWeight: 'bold' }}>{result?.totalSqMt.toFixed(2)}</td>
+                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #9ca3af', fontWeight: 'bold', color: '#1e3a8a' }}>{result?.fpAreaSqMt.toFixed(2)}</td>
                       </tr>
                       <tr>
-                         <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Area (Vigha)</td>
-                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold' }}>{result ? convertValue(result.inputInVigha, 'Vigha').toFixed(2) : '-'}</td>
-                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#2563eb' }}>{result ? convertValue(result.fpInVigha, 'Vigha').toFixed(2) : '-'}</td>
+                         <td style={{ padding: '8px', borderBottom: '1px solid #9ca3af' }}>Area (Vigha)</td>
+                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #9ca3af', fontWeight: 'bold' }}>{result ? convertValue(result.inputInVigha, 'Vigha').toFixed(2) : '-'}</td>
+                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #9ca3af', fontWeight: 'bold', color: '#1e3a8a' }}>{result ? convertValue(result.fpInVigha, 'Vigha').toFixed(2) : '-'}</td>
                       </tr>
                       <tr>
-                         <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Jantri Value</td>
-                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold' }}>{formatCurrency(result?.totalJantriValue || 0)}</td>
-                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#2563eb' }}>{formatCurrency(result?.fpJantriValue || 0)}</td>
+                         <td style={{ padding: '8px', borderBottom: '1px solid #9ca3af' }}>Jantri Value</td>
+                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #9ca3af', fontWeight: 'bold' }}>{formatCurrency(result?.totalJantriValue || 0)}</td>
+                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #9ca3af', fontWeight: 'bold', color: '#1e3a8a' }}>{formatCurrency(result?.fpJantriValue || 0)}</td>
                       </tr>
                       <tr>
-                         <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Stamp Duty ({overheads.stampDutyPercent}%)</td>
-                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold' }}>{formatCurrency(result?.stampDuty100 || 0)}</td>
-                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#2563eb' }}>{formatCurrency(result?.stampDuty60 || 0)}</td>
+                         <td style={{ padding: '8px', borderBottom: '1px solid #9ca3af' }}>Stamp Duty ({overheads.stampDutyPercent}%)</td>
+                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #9ca3af', fontWeight: 'bold' }}>{formatCurrency(result?.stampDuty100 || 0)}</td>
+                         <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #9ca3af', fontWeight: 'bold', color: '#1e3a8a' }}>{formatCurrency(result?.stampDuty60 || 0)}</td>
                       </tr>
                    </tbody>
                 </table>
@@ -767,137 +826,138 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack }) => {
 
             {result && (
               <>
-                {/* SECTION B: DEAL STRUCTURE */}
-                <div style={{ marginBottom: '30px' }}>
-                   <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #e5e7eb', paddingBottom: '5px', marginBottom: '10px', color: '#374151', textTransform: 'uppercase' }}>Section B: Deal Structure</h3>
-                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-                      <tr>
-                         <td style={{ padding: '6px 0', borderBottom: '1px solid #f3f4f6', color: '#6b7280' }}>Price Per Vigha</td>
-                         <td style={{ fontWeight: 'bold', textAlign: 'right', borderBottom: '1px solid #f3f4f6' }}>{formatCurrency(Number(financials.pricePerVigha))}</td>
-                      </tr>
-                      <tr>
-                         <td style={{ padding: '6px 0', borderBottom: '1px solid #f3f4f6', color: '#6b7280' }}>Total Deal Price</td>
-                         <td style={{ fontWeight: 'bold', textAlign: 'right', borderBottom: '1px solid #f3f4f6' }}>{formatCurrency(calculatedDealPrice)}</td>
-                      </tr>
-                      <tr>
-                         <td style={{ padding: '6px 0', borderBottom: '1px solid #f3f4f6', color: '#6b7280' }}>Down Payment</td>
-                         <td style={{ fontWeight: 'bold', textAlign: 'right', borderBottom: '1px solid #f3f4f6' }}>
+                {/* 3. SECTION B: DEAL STRUCTURE */}
+                <div style={{ marginBottom: '30px', pageBreakInside: 'avoid' }}>
+                   <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #9ca3af', paddingBottom: '5px', marginBottom: '10px', color: '#000000', textTransform: 'uppercase' }}>B. Deal Structure</h3>
+                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', backgroundColor: '#f3f4f6', padding: '15px', borderRadius: '6px' }}>
+                      <div style={{ flex: '1 1 40%' }}>
+                         <div style={{ fontSize: '9px', color: '#333333' }}>Price Per Vigha</div>
+                         <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#000000' }}>{formatCurrency(Number(financials.pricePerVigha))}</div>
+                      </div>
+                      <div style={{ flex: '1 1 40%' }}>
+                         <div style={{ fontSize: '9px', color: '#333333' }}>Total Deal Price</div>
+                         <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#000000' }}>{formatCurrency(calculatedDealPrice)}</div>
+                      </div>
+                      <div style={{ flex: '1 1 40%' }}>
+                         <div style={{ fontSize: '9px', color: '#333333' }}>Down Payment</div>
+                         <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#000000' }}>
                             {formatCurrency(Number(financials.downPaymentAmount))} ({financials.downPaymentPercent}%)
-                         </td>
-                      </tr>
-                      <tr>
-                         <td style={{ padding: '6px 0', borderBottom: '1px solid #f3f4f6', color: '#6b7280' }}>Payment Duration</td>
-                         <td style={{ fontWeight: 'bold', textAlign: 'right', borderBottom: '1px solid #f3f4f6' }}>
-                            {financials.totalDurationMonths} Months (DP Window: {financials.downPaymentDurationMonths} Mo)
-                         </td>
-                      </tr>
-                      <tr>
-                         <td style={{ padding: '6px 0', borderBottom: '1px solid #f3f4f6', color: '#6b7280' }}>Installments</td>
-                         <td style={{ fontWeight: 'bold', textAlign: 'right', borderBottom: '1px solid #f3f4f6' }}>
+                         </div>
+                         <div style={{ fontSize: '10px', color: '#c2410c' }}>Window: {financials.downPaymentDurationMonths} Months</div>
+                      </div>
+                      <div style={{ flex: '1 1 40%' }}>
+                         <div style={{ fontSize: '9px', color: '#333333' }}>Installments</div>
+                         <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#000000' }}>
                             {financials.numberOfInstallments} Payments
-                         </td>
-                      </tr>
-                   </table>
+                         </div>
+                         <div style={{ fontSize: '10px', color: '#333333' }}>Total Duration: {financials.totalDurationMonths} Months</div>
+                      </div>
+                   </div>
                 </div>
 
-                {/* SECTION C: COST METRICS COMPARISON */}
-                <div style={{ marginBottom: '30px' }}>
-                   <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #e5e7eb', paddingBottom: '5px', marginBottom: '10px', color: '#374151', textTransform: 'uppercase' }}>Section C: Cost Metrics Comparison</h3>
+                {/* 4. SECTION C: COST METRICS COMPARISON */}
+                <div style={{ marginBottom: '30px', pageBreakInside: 'avoid' }}>
+                   <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #9ca3af', paddingBottom: '5px', marginBottom: '10px', color: '#000000', textTransform: 'uppercase' }}>C. Cost Metrics Comparison</h3>
                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
                       <thead style={{ backgroundColor: '#f3f4f6' }}>
                          <tr>
-                            <th style={{ textAlign: 'left', padding: '8px' }}>Metric</th>
-                            <th style={{ textAlign: 'right', padding: '8px' }}>On 100% Area</th>
-                            <th style={{ textAlign: 'right', padding: '8px' }}>On 60% Area</th>
+                            <th style={{ textAlign: 'left', padding: '8px', width: '30%', color: '#000000' }}>Unit Cost</th>
+                            <th style={{ textAlign: 'right', padding: '8px', width: '35%', color: '#000000' }}>On 100% Basis</th>
+                            <th style={{ textAlign: 'right', padding: '8px', width: '35%', color: '#000000' }}>On 60% Basis</th>
                          </tr>
                       </thead>
                       <tbody>
                          <tr>
-                            <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Cost per Sq Mt</td>
-                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold' }}>{formatCurrency(result.costPerSqMt100)}</td>
-                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#2563eb' }}>{formatCurrency(result.costPerSqMt60)}</td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #9ca3af' }}>Cost per Sq Mt</td>
+                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #9ca3af', fontWeight: 'bold' }}>{formatCurrency(result.costPerSqMt100)}</td>
+                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #9ca3af', fontWeight: 'bold', color: '#1e3a8a' }}>{formatCurrency(result.costPerSqMt60)}</td>
                          </tr>
                          <tr>
-                            <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Cost per Vigha</td>
-                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold' }}>{formatCurrency(result.costPerVigha100)}</td>
-                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#2563eb' }}>{formatCurrency(result.costPerVigha60)}</td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #9ca3af' }}>Cost per Vigha</td>
+                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #9ca3af', fontWeight: 'bold' }}>{formatCurrency(result.costPerVigha100)}</td>
+                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #9ca3af', fontWeight: 'bold', color: '#1e3a8a' }}>{formatCurrency(result.costPerVigha60)}</td>
                          </tr>
                          <tr>
-                            <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>Cost per Vaar</td>
-                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold' }}>{formatCurrency(result.costPerVaar100)}</td>
-                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#2563eb' }}>{formatCurrency(result.costPerVaar60)}</td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #9ca3af' }}>Cost per Vaar</td>
+                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #9ca3af', fontWeight: 'bold' }}>{formatCurrency(result.costPerVaar100)}</td>
+                            <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #9ca3af', fontWeight: 'bold', color: '#1e3a8a' }}>{formatCurrency(result.costPerVaar60)}</td>
                          </tr>
                       </tbody>
                    </table>
                 </div>
 
-                {/* SECTION D (PART 1): EXPENSES */}
-                <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #e5e7eb', paddingBottom: '5px', marginBottom: '10px', color: '#374151', textTransform: 'uppercase' }}>Section D: Expense Breakdown</h3>
-                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '10px', fontSize: '11px' }}>
-                   {/* We only show Expenses that contribute to cost. Stamp Duty is dynamic based on context, but usually reported on 100% in breakdown unless specified. Let's show the 100% Stamp for the base cost sheet in PDF, or clarify it varies. The user asked for detailed breakdown. Let's list the 100% Stamp Duty as standard reference or explicitly state it. Since cost metrics compare both, let's show 100% here as base. */}
-                   <tr><td style={{ padding: '6px 0' }}>Stamp Duty (100% Basis)</td><td style={{ textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(result.stampDuty100)}</td></tr>
-                   {getNum(overheads.architectFees) > 0 && <tr><td style={{ padding: '6px 0' }}>Architect Fees</td><td style={{ textAlign: 'right' }}>{formatCurrency(Number(overheads.architectFees))}</td></tr>}
-                   {getNum(overheads.planPassFees) > 0 && <tr><td style={{ padding: '6px 0' }}>Plan Pass Fees</td><td style={{ textAlign: 'right' }}>{formatCurrency(Number(overheads.planPassFees))}</td></tr>}
-                   {getNum(overheads.naExpense) > 0 && <tr><td style={{ padding: '6px 0' }}>NA Expense</td><td style={{ textAlign: 'right' }}>{formatCurrency(Number(overheads.naExpense))}</td></tr>}
-                   {getNum(overheads.naPremium) > 0 && <tr><td style={{ padding: '6px 0' }}>NA Premium</td><td style={{ textAlign: 'right' }}>{formatCurrency(Number(overheads.naPremium))}</td></tr>}
-                   {getNum(overheads.developmentCost) > 0 && <tr><td style={{ padding: '6px 0' }}>Development Cost</td><td style={{ textAlign: 'right' }}>{formatCurrency(Number(overheads.developmentCost))}</td></tr>}
-                   <tr style={{ backgroundColor: '#fff7ed', borderTop: '1px solid #fdba74' }}>
-                      <td style={{ padding: '8px', fontWeight: 'bold', color: '#c2410c' }}>TOTAL PROJECT COST (100% Basis)</td>
-                      <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold', color: '#c2410c' }}>{formatCurrency(result.landedCost100)}</td>
-                   </tr>
-                </table>
+                {/* 5. SECTION D: PROJECT EXPENSES & TOTAL */}
+                <div style={{ marginBottom: '30px', pageBreakInside: 'avoid' }}>
+                  <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #9ca3af', paddingBottom: '5px', marginBottom: '10px', color: '#000000', textTransform: 'uppercase' }}>D. Project Expenses & Total ({costSheetBasis}%)</h3>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '10px', fontSize: '11px' }}>
+                     <tbody>
+                       {/* Dynamic Stamp Duty Row */}
+                       <tr>
+                          <td style={{ padding: '6px 0', borderBottom: '1px solid #9ca3af' }}>Stamp Duty & Registration ({costSheetBasis === '100' ? '100% Land' : '60% FP'})</td>
+                          <td style={{ textAlign: 'right', fontWeight: 'bold', borderBottom: '1px solid #9ca3af' }}>{formatCurrency(currentStampDuty)}</td>
+                       </tr>
+                       
+                       {/* Additional Expenses List */}
+                       {getNum(overheads.architectFees) > 0 && <tr><td style={{ padding: '6px 0', borderBottom: '1px solid #9ca3af' }}>Architect Fees</td><td style={{ textAlign: 'right', borderBottom: '1px solid #9ca3af' }}>{formatCurrency(Number(overheads.architectFees))}</td></tr>}
+                       {getNum(overheads.planPassFees) > 0 && <tr><td style={{ padding: '6px 0', borderBottom: '1px solid #9ca3af' }}>Plan Pass Fees</td><td style={{ textAlign: 'right', borderBottom: '1px solid #9ca3af' }}>{formatCurrency(Number(overheads.planPassFees))}</td></tr>}
+                       {getNum(overheads.naExpense) > 0 && <tr><td style={{ padding: '6px 0', borderBottom: '1px solid #9ca3af' }}>NA Expense</td><td style={{ textAlign: 'right', borderBottom: '1px solid #9ca3af' }}>{formatCurrency(Number(overheads.naExpense))}</td></tr>}
+                       {getNum(overheads.naPremium) > 0 && <tr><td style={{ padding: '6px 0', borderBottom: '1px solid #9ca3af' }}>NA Premium</td><td style={{ textAlign: 'right', borderBottom: '1px solid #9ca3af' }}>{formatCurrency(Number(overheads.naPremium))}</td></tr>}
+                       {getNum(overheads.developmentCost) > 0 && <tr><td style={{ padding: '6px 0', borderBottom: '1px solid #9ca3af' }}>Development Cost</td><td style={{ textAlign: 'right', borderBottom: '1px solid #9ca3af' }}>{formatCurrency(Number(overheads.developmentCost))}</td></tr>}
+                       
+                       {/* Total Project Cost */}
+                       <tr style={{ backgroundColor: '#fff7ed', borderTop: '2px solid #ea580c' }}>
+                          <td style={{ padding: '12px 8px', fontWeight: 'bold', color: '#c2410c', fontSize: '12px' }}>TOTAL PROJECT COST ({costSheetBasis}%)</td>
+                          <td style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 'bold', color: '#c2410c', fontSize: '14px' }}>{formatCurrency(currentLandedCost)}</td>
+                       </tr>
+                     </tbody>
+                  </table>
+                </div>
+
+                {/* 6. SECTION E: PAYMENT SCHEDULE */}
+                <div style={{ marginTop: '30px' }}>
+                   <div style={{ borderBottom: '2px solid #ea580c', paddingBottom: '10px', marginBottom: '20px' }}>
+                      <h1 style={{ fontSize: '18px', fontWeight: 'bold', margin: 0, color: '#000000' }}>E. PAYMENT SCHEDULE</h1>
+                      <p style={{ margin: '4px 0 0', color: '#333333', fontSize: '10px' }}>Detailed Installment Plan</p>
+                   </div>
+
+                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px' }}>
+                     <thead style={{ backgroundColor: '#f3f4f6' }}>
+                       <tr>
+                         <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #9ca3af', color: '#000000' }}>#</th>
+                         <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #9ca3af', color: '#000000' }}>Description</th>
+                         <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #9ca3af', color: '#000000' }}>Due Date</th>
+                         <th style={{ padding: '8px', textAlign: 'right', borderBottom: '2px solid #9ca3af', color: '#000000' }}>Amount</th>
+                       </tr>
+                     </thead>
+                     <tbody>
+                       {result.schedule.map((item, i) => (
+                         <tr key={item.id} style={{ pageBreakInside: 'avoid' }}>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #9ca3af', width: '30px' }}>{i+1}</td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #9ca3af' }}>{item.description}</td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #9ca3af' }}>{item.date}</td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #9ca3af', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(item.amount)}</td>
+                         </tr>
+                       ))}
+                       <tr style={{ backgroundColor: '#f3f4f6', fontWeight: 'bold', pageBreakInside: 'avoid' }}>
+                         <td colSpan={3} style={{ padding: '10px', borderBottom: '1px solid #9ca3af', textTransform: 'uppercase', color: '#000000' }}>Total Payable to Land Owner</td>
+                         <td style={{ padding: '10px', borderBottom: '1px solid #9ca3af', textAlign: 'right', color: '#000000' }}>{formatCurrency(result.grandTotalPayment)}</td>
+                       </tr>
+                     </tbody>
+                   </table>
+
+                   <div style={{ marginTop: '25px', padding: '15px', backgroundColor: '#eff6ff', border: '1px solid #9ca3af', borderRadius: '6px', fontSize: '10px', pageBreakInside: 'avoid' }}>
+                      <strong style={{ color: '#1e3a8a', display: 'block', marginBottom: '5px' }}>Important Notes:</strong>
+                      <ul style={{ margin: 0, paddingLeft: '15px', color: '#1e3a8a' }}>
+                         <li style={{ marginBottom: '3px' }}>The Govt. Jantri Value ({formatCurrency(currentJantriDisplay)}) is <strong>excluded</strong> from this schedule (Paid via Cheque at Registry).</li>
+                         <li>Installments are calculated after deducting the initial Down Payment window ({financials.downPaymentDurationMonths} Months).</li>
+                      </ul>
+                   </div>
+               </div>
               </>
             )}
           </div>
-
-          {/* PAGE BREAK */}
-          <div style={{ pageBreakBefore: 'always' }}></div>
-
-          {/* PAGE 2: SCHEDULE */}
-          <div className="page-2" style={{ padding: '40px', height: 'auto' }}>
-             <div style={{ borderBottom: '2px solid #ea580c', paddingBottom: '10px', marginBottom: '25px' }}>
-                <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#1f2937' }}>PAYMENT SCHEDULE</h1>
-                <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '10px' }}>Installment Breakdown</p>
-             </div>
-
-             {result && (
-               <>
-                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px' }}>
-                   <thead style={{ backgroundColor: '#f3f4f6' }}>
-                     <tr>
-                       <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e5e7eb' }}>#</th>
-                       <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e5e7eb' }}>Description</th>
-                       <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e5e7eb' }}>Due Date</th>
-                       <th style={{ padding: '8px', textAlign: 'right', borderBottom: '2px solid #e5e7eb' }}>Amount</th>
-                     </tr>
-                   </thead>
-                   <tbody>
-                     {result.schedule.map((item, i) => (
-                       <tr key={item.id}>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb', width: '30px' }}>{i+1}</td>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>{item.description}</td>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>{item.date}</td>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(item.amount)}</td>
-                       </tr>
-                     ))}
-                     <tr style={{ backgroundColor: '#f3f4f6', fontWeight: 'bold' }}>
-                       <td colSpan={3} style={{ padding: '10px', borderBottom: '1px solid #e5e7eb', textTransform: 'uppercase' }}>Total Payable to Land Owner</td>
-                       <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb', textAlign: 'right' }}>{formatCurrency(result.grandTotalPayment)}</td>
-                     </tr>
-                   </tbody>
-                 </table>
-
-                 <div style={{ marginTop: '25px', padding: '15px', backgroundColor: '#eff6ff', border: '1px solid #dbeafe', borderRadius: '6px', fontSize: '10px' }}>
-                    <strong style={{ color: '#1e40af', display: 'block', marginBottom: '5px' }}>Important Notes:</strong>
-                    <ul style={{ margin: 0, paddingLeft: '15px', color: '#1e3a8a' }}>
-                       <li style={{ marginBottom: '3px' }}>The Govt. Jantri Value ({formatCurrency(result.totalJantriValue)}) is <strong>excluded</strong> from this schedule (Paid via Cheque at Registry).</li>
-                       <li>Installments are calculated after deducting the initial Down Payment window ({financials.downPaymentDurationMonths} Months).</li>
-                    </ul>
-                 </div>
-               </>
-             )}
-          </div>
       </div>
+      
     </div>
   );
 };

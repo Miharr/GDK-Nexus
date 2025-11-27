@@ -5,19 +5,27 @@ import {
   LayoutGrid, 
   Hexagon, 
   ArrowRight,
-  Construction
+  Construction,
+  History
 } from 'lucide-react';
 import { Loader } from './components/Loader';
 import { LandDealStructurer } from './components/LandDealStructurer';
+import { ProjectHistory } from './components/ProjectHistory';
+import { ProjectSavedState } from './types';
 
-type ViewState = 'dashboard' | 'loading' | 'land-structurer' | 'plotting';
+type ViewState = 'dashboard' | 'loading' | 'land-structurer' | 'plotting' | 'history';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>('dashboard');
-  const [targetView, setTargetView] = useState<ViewState>('dashboard');
+  // State to hold data loaded from history to pass into the Structurer
+  const [loadedProjectData, setLoadedProjectData] = useState<ProjectSavedState | undefined>(undefined);
 
   const handleModuleSelect = (view: ViewState) => {
-    setTargetView(view);
+    // If we are going to structurer from dashboard directly, reset any loaded data
+    if (view === 'land-structurer') {
+      setLoadedProjectData(undefined);
+    }
+
     setCurrentView('loading');
     
     // Simulate system loading time
@@ -28,6 +36,14 @@ const App: React.FC = () => {
 
   const handleBackToDash = () => {
     setCurrentView('dashboard');
+  };
+
+  const handleLoadProject = (data: ProjectSavedState) => {
+    setLoadedProjectData(data);
+    setCurrentView('loading');
+    setTimeout(() => {
+      setCurrentView('land-structurer');
+    }, 1000);
   };
 
   return (
@@ -85,7 +101,7 @@ const App: React.FC = () => {
             </header>
 
             {/* Modules Grid - Centered 2 Cols */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-10 max-w-5xl mx-auto w-full flex-1 items-center content-center">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10 max-w-6xl mx-auto w-full flex-1 items-center content-center">
               
               {/* Card 1: Land Acquisition */}
               <NeuCard 
@@ -103,6 +119,15 @@ const App: React.FC = () => {
                 icon={<LayoutGrid size={32} />}
                 delay={0.2}
                 onClick={() => handleModuleSelect('plotting')}
+              />
+
+              {/* Card 3: History */}
+              <NeuCard 
+                title="Project History"
+                subtitle="Archives & Database"
+                icon={<History size={32} />}
+                delay={0.3}
+                onClick={() => handleModuleSelect('history')}
               />
 
             </div>
@@ -123,8 +148,24 @@ const App: React.FC = () => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <LandDealStructurer onBack={handleBackToDash} />
+            <LandDealStructurer 
+              onBack={handleBackToDash} 
+              initialData={loadedProjectData}
+            />
           </motion.div>
+        )}
+
+        {/* --- VIEW: MODULE 2 (PROJECT HISTORY) --- */}
+        {currentView === 'history' && (
+           <motion.div
+           key="module-history"
+           className="absolute inset-0 z-10 bg-[#F1F5F9] overflow-y-auto"
+           initial={{ opacity: 0 }}
+           animate={{ opacity: 1 }}
+           exit={{ opacity: 0 }}
+         >
+           <ProjectHistory onBack={handleBackToDash} onLoadProject={handleLoadProject} />
+         </motion.div>
         )}
 
         {/* --- VIEW: PLACEHOLDERS --- */}
