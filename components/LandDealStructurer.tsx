@@ -52,11 +52,13 @@ const CONVERSION_RATES = {
 interface Props {
   onBack: () => void;
   initialData?: ProjectSavedState;
+  initialId?: number;
 }
 
-export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => {
+export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData, initialId }) => {
   
   // --- STATE ---
+  const [currentProjectId, setCurrentProjectId] = useState<number | null>(initialId || null);
   const [identity, setIdentity] = useState<LandIdentity>({
     village: '', tpScheme: '', fpNumber: '', blockSurveyNumber: '',
   });
@@ -95,7 +97,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
 
   // --- HYDRATION EFFECT ---
-  useEffect(() => {
+ useEffect(() => {
     if (initialData) {
       setIdentity(initialData.identity);
       setMeasurements(initialData.measurements);
@@ -104,7 +106,10 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
       setAnalysisUnit(initialData.analysisUnit);
       setCostSheetBasis(initialData.costSheetBasis);
     }
-  }, [initialData]);
+    if (initialId) {
+        setCurrentProjectId(initialId);
+    }
+  }, [initialData, initialId]);
 
   // --- CALCULATION ENGINE ---
   useEffect(() => {
@@ -222,8 +227,9 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
   }, [measurements, financials, overheads]);
 
   // --- HANDLERS ---
-  const handleClear = () => {
+const handleClear = () => {
     // Reset all states immediately without confirmation dialog
+    setCurrentProjectId(null); // Clear ID so next save is a NEW row
     setIdentity({ village: '', tpScheme: '', fpNumber: '', blockSurveyNumber: '' });
     setMeasurements({ areaInput: '', inputUnit: 'SqMeter', displayUnit: 'Vigha', jantriRate: '' });
     
@@ -281,16 +287,38 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
    const projectName = `${identity.village || 'Project'} - TP ${identity.tpScheme || '-'} - FP ${identity.fpNumber || '-'}`;
 
     try {
-        const { error } = await supabase.from('projects').insert({
-            project_name: projectName,
-            village_name: identity.village,
-            total_land_cost: result ? (costSheetBasis === '100' ? result.landedCost100 : result.landedCost60) : 0,
-            full_data: projectData
-        });
+        let error;
+        
+        if (currentProjectId) {
+            // UPDATE EXISTING ROW
+            const response = await supabase.from('projects').update({
+                project_name: projectName,
+                village_name: identity.village,
+                total_land_cost: result ? (costSheetBasis === '100' ? result.landedCost100 : result.landedCost60) : 0,
+                full_data: projectData
+            }).eq('id', currentProjectId);
+            error = response.error;
+        } else {
+            // INSERT NEW ROW
+            const response = await supabase.from('projects').insert({
+                project_name: projectName,
+                village_name: identity.village,
+                total_land_cost: result ? (costSheetBasis === '100' ? result.landedCost100 : result.landedCost60) : 0,
+                full_data: projectData
+            }).select(); // Select to get the new ID back
+            
+            error = response.error;
+            
+            // Set the ID so next click is an update
+            if (response.data && response.data[0]) {
+                setCurrentProjectId(response.data[0].id);
+            }
+        }
 
         if (error) throw error;
         
         // Trigger Silent Success Animation
+      
         setShowSaveSuccess(true);
         setTimeout(() => setShowSaveSuccess(false), 2000); // Hide after 2 seconds
 
@@ -934,18 +962,35 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData }) => 
                   <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #9ca3af', paddingBottom: '5px', marginBottom: '10px', color: '#000000', textTransform: 'uppercase' }}>D. Project Expenses & Total ({costSheetBasis}%)</h3>
                   <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '10px', fontSize: '11px' }}>
                      <tbody>
-                       {/* Dynamic Stamp Duty Row */}
+                       {/* 1. Stamp Duty */}
                        <tr>
-                          <td style={{ padding: '6px 0', borderBottom: '1px solid #9ca3af' }}>Stamp Duty & Registration ({costSheetBasis === '100' ? '100% Land' : '60% FP'})</td>
-                          <td style={{ textAlign: 'right', fontWeight: 'bold', borderBottom: '1px solid #9ca3af' }}>{formatCurrency(currentStampDuty)}</td>
+                          <td style={{ padding: '6px 0', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#000000' }}>1. Stamp Duty & Registration ({costSheetBasis === '100' ? '100% Land' : '60% FP'})</td>
+                          <td style={{ textAlign: 'right', fontWeight: 'bold', borderBottom: '1px solid #e5e7eb', color: '#000000' }}>{formatCurrency(currentStampDuty)}</td>
                        </tr>
                        
-                       {/* Additional Expenses List */}
-                       {getNum(overheads.architectFees) > 0 && <tr><td style={{ padding: '6px 0', borderBottom: '1px solid #9ca3af' }}>Architect Fees</td><td style={{ textAlign: 'right', borderBottom: '1px solid #9ca3af' }}>{formatCurrency(Number(overheads.architectFees))}</td></tr>}
-                       {getNum(overheads.planPassFees) > 0 && <tr><td style={{ padding: '6px 0', borderBottom: '1px solid #9ca3af' }}>Plan Pass Fees</td><td style={{ textAlign: 'right', borderBottom: '1px solid #9ca3af' }}>{formatCurrency(Number(overheads.planPassFees))}</td></tr>}
-                       {getNum(overheads.naExpense) > 0 && <tr><td style={{ padding: '6px 0', borderBottom: '1px solid #9ca3af' }}>NA Expense</td><td style={{ textAlign: 'right', borderBottom: '1px solid #9ca3af' }}>{formatCurrency(Number(overheads.naExpense))}</td></tr>}
-                       {getNum(overheads.naPremium) > 0 && <tr><td style={{ padding: '6px 0', borderBottom: '1px solid #9ca3af' }}>NA Premium</td><td style={{ textAlign: 'right', borderBottom: '1px solid #9ca3af' }}>{formatCurrency(Number(overheads.naPremium))}</td></tr>}
-                       {getNum(overheads.developmentCost) > 0 && <tr><td style={{ padding: '6px 0', borderBottom: '1px solid #9ca3af' }}>Development Cost</td><td style={{ textAlign: 'right', borderBottom: '1px solid #9ca3af' }}>{formatCurrency(Number(overheads.developmentCost))}</td></tr>}
+                       {/* 2. Additional Expenses Header */}
+                       <tr>
+                          <td colSpan={2} style={{ padding: '8px 0 4px', fontWeight: 'bold', color: '#333333', fontSize: '10px', textTransform: 'uppercase' }}>2. Additional Expenses Breakdown</td>
+                       </tr>
+
+                       {/* List of Extras */}
+                       {getNum(overheads.architectFees) > 0 && <tr><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>Architect Fees</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.architectFees))}</td></tr>}
+                       {getNum(overheads.planPassFees) > 0 && <tr><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>Plan Pass Fees</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.planPassFees))}</td></tr>}
+                       {getNum(overheads.naExpense) > 0 && <tr><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>NA Expense</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.naExpense))}</td></tr>}
+                       {getNum(overheads.naPremium) > 0 && <tr><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>NA Premium</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.naPremium))}</td></tr>}
+                       {getNum(overheads.developmentCost) > 0 && <tr><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>Development Cost</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.developmentCost))}</td></tr>}
+                       
+                       {/* Total Additional Expenses Subtotal */}
+                       <tr style={{ backgroundColor: '#f9fafb' }}>
+                          <td style={{ padding: '6px 8px', fontWeight: 'bold', color: '#4b5563', fontSize: '11px' }}>Total Additional Expenses</td>
+                          <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 'bold', color: '#4b5563', fontSize: '11px' }}>{formatCurrency(result.totalAdditionalExpenses)}</td>
+                       </tr>
+
+                       {/* Grand Total */}
+                       <tr style={{ backgroundColor: '#fff7ed', borderTop: '2px solid #ea580c' }}>
+                          <td style={{ padding: '12px 8px', fontWeight: 'bold', color: '#c2410c', fontSize: '12px' }}>FINAL PROJECT COST ({costSheetBasis}%)</td>
+                          <td style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 'bold', color: '#c2410c', fontSize: '14px' }}>{formatCurrency(currentLandedCost)}</td>
+                       </tr>
                        
                        {/* Total Project Cost */}
                        <tr style={{ backgroundColor: '#fff7ed', borderTop: '2px solid #ea580c' }}>
