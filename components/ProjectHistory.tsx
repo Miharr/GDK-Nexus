@@ -81,12 +81,13 @@ export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject }) => {
     }
   };
 
-  const handleLoad = (project: ProjectRow) => {
+ const handleLoad = (project: ProjectRow) => {
     if (!project.full_data) {
       alert('Project data is corrupted or missing.');
       return;
     }
-    onLoadProject(project.full_data);
+    // Pass ID along with data
+    onLoadProject(project.full_data, project.id);
   };
 
   // Filter Logic
