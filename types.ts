@@ -1,4 +1,5 @@
 
+
 export type UnitType = 'SqMeter' | 'Vaar' | 'Vigha' | 'Guntha' | 'SqKm';
 
 export interface LandIdentity {
@@ -94,13 +95,24 @@ export interface PlottingDevExpense {
   amount: number | '';
 }
 
+export interface PlotGroup {
+  id: string;
+  count: number | '';
+  area: number | '';
+  unit: UnitType;
+}
+
 export type PlotStatus = 'available' | 'booked' | 'sold';
 
 export interface PlottingState {
   deductionPercent: number | '';
   developmentExpenses: PlottingDevExpense[];
-  totalPlots: number | '';
+  
+  // Inventory State
+  plotGroups: PlotGroup[]; // New field for groups
+  totalPlots: number | ''; // Kept for backward compat / calculated
   plotsStatus: PlotStatus[];
+  
   expectedSalesRate: number | '';
   salesRateUnit: UnitType;
 }

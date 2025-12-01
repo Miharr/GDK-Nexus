@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   ArrowLeft, 
@@ -9,7 +10,8 @@ import {
   PieChart as PieChartIcon,
   Plus,
   Trash2,
-  CheckCircle
+  CheckCircle,
+  Settings2
 } from 'lucide-react';
 import { Card } from './Card';
 import { supabase } from '../supabaseClient';
@@ -18,7 +20,8 @@ import {
   PlottingState, 
   PlottingDevExpense, 
   PlotStatus,
-  UnitType 
+  UnitType,
+  PlotGroup
 } from '../types';
 import { formatCurrency, formatInputNumber, parseInputNumber } from '../utils/formatters';
 
@@ -46,7 +49,12 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, projectData, existi
     { id: '2', description: 'Internal Roads', amount: '' },
     { id: '3', description: 'Entry Gate', amount: '' },
   ]);
-  const [totalPlots, setTotalPlots] = useState<number | ''>(20);
+  
+  // New Inventory State
+  const [plotGroups, setPlotGroups] = useState<PlotGroup[]>([
+    { id: '1', count: 10, area: 100, unit: 'SqMeter' }
+  ]);
+  
   const [plotsStatus, setPlotsStatus] = useState<PlotStatus[]>([]);
   const [expectedSalesRate, setExpectedSalesRate] = useState<number | ''>('');
   const [salesRateUnit, setSalesRateUnit] = useState<UnitType>('SqMeter');
@@ -57,23 +65,39 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, projectData, existi
     if (existingPlottingData) {
       setDeductionPercent(existingPlottingData.deductionPercent);
       setDevExpenses(existingPlottingData.developmentExpenses || []);
-      setTotalPlots(existingPlottingData.totalPlots);
       setPlotsStatus(existingPlottingData.plotsStatus || []);
       setExpectedSalesRate(existingPlottingData.expectedSalesRate);
       setSalesRateUnit(existingPlottingData.salesRateUnit || 'SqMeter');
+      
+      // Load groups if exist, else default
+      if (existingPlottingData.plotGroups && existingPlottingData.plotGroups.length > 0) {
+        setPlotGroups(existingPlottingData.plotGroups);
+      } else if (existingPlottingData.totalPlots) {
+        // Fallback for old data: Create one group with the total plots
+        setPlotGroups([{ 
+            id: 'legacy', 
+            count: existingPlottingData.totalPlots, 
+            area: 100, // Placeholder area
+            unit: 'SqMeter' 
+        }]);
+      }
     }
   }, [existingPlottingData]);
 
-  // Sync Plots Status Array size with Total Plots
+  // Sync Plots Status Array size with Total Calculated Plots
+  const totalPlotsCalculated = useMemo(() => {
+    return plotGroups.reduce((sum, g) => sum + (g.count === '' ? 0 : g.count), 0);
+  }, [plotGroups]);
+
   useEffect(() => {
-    const count = totalPlots === '' ? 0 : totalPlots;
+    const count = totalPlotsCalculated;
     setPlotsStatus(prev => {
       if (prev.length === count) return prev;
       if (prev.length > count) return prev.slice(0, count);
       // Add new plots as available
       return [...prev, ...Array(count - prev.length).fill('available')];
     });
-  }, [totalPlots]);
+  }, [totalPlotsCalculated]);
 
   // --- CALCULATIONS ---
 
@@ -101,8 +125,7 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, projectData, existi
     // Expenses
     const stampPercent = overheads.stampDutyPercent === '' ? 0 : Number(overheads.stampDutyPercent);
     
-    // CRITICAL FIX: Calculate Stamp Duty based on the SAVED BASIS (100% or 60%)
-    // This ensures the "Base Land Cost" here matches the "Total" in Project List minus Dev Cost.
+    // Stamp Duty
     let stampDuty = 0;
     if (costSheetBasis === '60') {
        stampDuty = fpJantriValue * (stampPercent / 100);
@@ -166,6 +189,41 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, projectData, existi
   const netProfit = projectedRevenue - totalProjectCost;
   const roi = totalProjectCost > 0 ? (netProfit / totalProjectCost) * 100 : 0;
 
+  // --- FLATTEN PLOTS FOR GRID RENDERING ---
+  const flattenedPlots = useMemo(() => {
+    const plots: { index: number, areaSqMt: number, displayArea: number, unit: UnitType }[] = [];
+    let currentIndex = 0;
+
+    plotGroups.forEach(group => {
+      const count = group.count === '' ? 0 : group.count;
+      const area = group.area === '' ? 0 : group.area;
+      // Convert to SqMt for uniform sizing logic
+      const areaInSqMt = area * (CONVERSION_RATES.SqMeter / CONVERSION_RATES[group.unit]);
+      
+      for (let i = 0; i < count; i++) {
+        plots.push({
+          index: currentIndex,
+          areaSqMt: areaInSqMt,
+          displayArea: area,
+          unit: group.unit
+        });
+        currentIndex++;
+      }
+    });
+    return plots;
+  }, [plotGroups]);
+
+  // Calculate Grid Sizing Metrics
+  const { minArea, maxArea } = useMemo(() => {
+      if (flattenedPlots.length === 0) return { minArea: 100, maxArea: 100 };
+      const areas = flattenedPlots.map(p => p.areaSqMt);
+      return { 
+          minArea: Math.min(...areas), 
+          maxArea: Math.max(...areas) 
+      };
+  }, [flattenedPlots]);
+
+
   // --- HANDLERS ---
   
   const handleAddExpense = () => {
@@ -179,6 +237,20 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, projectData, existi
   const handleExpenseChange = (id: string, field: 'description' | 'amount', value: any) => {
     setDevExpenses(devExpenses.map(e => e.id === id ? { ...e, [field]: value } : e));
   };
+
+  // Group Handlers
+  const handleAddGroup = () => {
+    setPlotGroups([...plotGroups, { id: crypto.randomUUID(), count: 0, area: 0, unit: 'SqMeter' }]);
+  };
+
+  const handleRemoveGroup = (id: string) => {
+    setPlotGroups(plotGroups.filter(g => g.id !== id));
+  };
+
+  const handleGroupChange = (id: string, field: keyof PlotGroup, value: any) => {
+    setPlotGroups(plotGroups.map(g => g.id === id ? { ...g, [field]: value } : g));
+  };
+
 
   const cyclePlotStatus = (index: number) => {
     const statuses: PlotStatus[] = ['available', 'booked', 'sold'];
@@ -200,23 +272,23 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, projectData, existi
     const plottingData: PlottingState = {
       deductionPercent,
       developmentExpenses: devExpenses,
-      totalPlots,
+      totalPlots: totalPlotsCalculated,
+      plotGroups, // Save the groups configuration
       plotsStatus,
       expectedSalesRate,
       salesRateUnit
     };
 
-    // 3. Update Module 1 Data (full_data) to reflect this new cost
-    // We update the 'developmentCost' field in the overheads section
+    // 3. Update Module 1 Data (full_data)
     const updatedFullData: ProjectSavedState = {
        ...projectData,
        overheads: {
           ...projectData.overheads,
-          developmentCost: calculatedDevCost // SYNCING: This overrides Module 1 input
+          developmentCost: calculatedDevCost 
        }
     };
 
-    // 4. Recalculate the Grand Total Land Cost for the Database Column (for the list view)
+    // 4. Recalculate Total
     const newTotalLandCost = baseMetrics.landedCostWithoutDev + calculatedDevCost;
 
     try {
@@ -224,8 +296,8 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, projectData, existi
         .from('projects')
         .update({ 
             plotting_data: plottingData,
-            full_data: updatedFullData, // Save updated Module 1 data
-            total_land_cost: newTotalLandCost // Update dashboard card price
+            full_data: updatedFullData, 
+            total_land_cost: newTotalLandCost
         }) 
         .eq('id', projectId);
 
@@ -404,7 +476,7 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, projectData, existi
         </div>
 
         {/* 5. Profit Projector */}
-        <div className="md:col-span-5">
+        <div className="md:col-span-4">
            <Card title="Profit Projector" icon={<TrendingUp size={20} />} className="h-full">
               <div className="space-y-6">
                  <div>
@@ -433,17 +505,14 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, projectData, existi
                     </div>
                  </div>
 
-                 {/* REFACTORED: Stacked Layout for Profit/ROI to handle large numbers */}
+                 {/* REFACTORED: Stacked Layout for Profit/ROI */}
                  <div className="flex flex-col gap-5 pt-4 border-t border-slate-100 mt-2">
-                    {/* Net Profit */}
                     <div>
                        <div className="text-xs text-slate-400 font-bold uppercase mb-1">Net Profit</div>
                        <div className={`text-2xl font-bold tracking-tight ${netProfit >= 0 ? 'text-emerald-600' : 'text-red-500'} break-words leading-tight`}>
                           {formatCurrency(netProfit)}
                        </div>
                     </div>
-                    
-                    {/* ROI */}
                     <div>
                        <div className="text-xs text-slate-400 font-bold uppercase mb-1">Return on Investment (ROI)</div>
                        <div className={`text-xl font-bold ${roi >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
@@ -459,51 +528,130 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, projectData, existi
            </Card>
         </div>
 
-        {/* 6. Inventory Grid */}
-        <div className="md:col-span-7">
+        {/* 6. Inventory Grid & Configuration */}
+        <div className="md:col-span-8">
            <Card title="Inventory Management" icon={<LayoutGrid size={20} />} className="h-full">
-              <div className="flex flex-col h-full">
-                 <div className="flex items-end gap-4 mb-6">
-                    <div className="flex-1">
-                       <label className={labelClass}>Total Plots</label>
-                       <input 
-                         type="number"
-                         value={totalPlots}
-                         onChange={(e) => setTotalPlots(e.target.value === '' ? '' : parseInt(e.target.value))}
-                         className={inputClass}
-                       />
-                    </div>
-                    <div className="flex gap-4 text-xs font-bold pb-3">
-                       <div className="flex items-center gap-1"><div className="w-3 h-3 bg-slate-100 border border-slate-300 rounded"></div> Available</div>
-                       <div className="flex items-center gap-1"><div className="w-3 h-3 bg-emerald-500 rounded"></div> Booked</div>
-                       <div className="flex items-center gap-1"><div className="w-3 h-3 bg-red-500 rounded"></div> Sold</div>
-                    </div>
-                 </div>
-
-                 <div className="bg-slate-100 p-4 rounded-xl flex-1 min-h-[200px] overflow-y-auto custom-scrollbar border border-slate-200 inner-shadow">
-                    <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-5 lg:grid-cols-6 gap-3">
-                       {Array.from({ length: totalPlots === '' ? 0 : totalPlots }).map((_, idx) => {
-                          const status = plotsStatus[idx] || 'available';
-                          let bgClass = "bg-white hover:bg-slate-50 border-slate-300 text-slate-600";
-                          if (status === 'booked') bgClass = "bg-emerald-500 border-emerald-600 text-white shadow-emerald-200";
-                          if (status === 'sold') bgClass = "bg-red-500 border-red-600 text-white shadow-red-200";
-
-                          return (
-                             <button
-                                key={idx}
-                                onClick={() => cyclePlotStatus(idx)}
-                                className={`aspect-square rounded-lg border shadow-sm flex items-center justify-center font-bold text-sm transition-all active:scale-95 ${bgClass}`}
-                             >
-                                {idx + 1}
-                             </button>
-                          );
-                       })}
-                    </div>
-                 </div>
+              <div className="flex flex-col md:flex-row gap-6 h-full">
                  
-                 <div className="mt-4 flex justify-between text-xs font-bold text-slate-500">
-                    <div>Total: {totalPlots}</div>
-                    <div className="flex gap-4">
+                 {/* Left: Configuration List */}
+                 <div className="w-full md:w-1/3 flex flex-col border-b md:border-b-0 md:border-r border-slate-100 pb-4 md:pb-0 md:pr-4">
+                    <div className="flex items-center gap-2 mb-3 text-slate-600">
+                        <Settings2 size={16} />
+                        <h4 className="text-xs font-bold uppercase">Plot Configuration</h4>
+                    </div>
+                    
+                    <div className="flex-1 space-y-3 overflow-y-auto max-h-[250px] custom-scrollbar">
+                        {plotGroups.map((group) => (
+                           <div key={group.id} className="bg-slate-50 p-2 rounded-lg border border-slate-200 text-xs">
+                               <div className="flex justify-between items-center mb-2">
+                                   <span className="font-bold text-slate-500">Group</span>
+                                   <button onClick={() => handleRemoveGroup(group.id)} className="text-slate-400 hover:text-red-500">
+                                       <Trash2 size={14} />
+                                   </button>
+                               </div>
+                               <div className="grid grid-cols-2 gap-2 mb-2">
+                                  <div>
+    <label className="text-[10px] text-slate-400 uppercase">Count</label>
+    <input 
+        type="number" 
+        inputMode="numeric" /* integers typically for count */
+        min="0"
+        value={group.count}
+        /* Logic: If empty, set 0. Otherwise parse Int. */
+        onChange={(e) => handleGroupChange(group.id, 'count', e.target.value === '' ? 0 : parseInt(e.target.value))}
+        onFocus={(e) => e.target.select()} /* UX Bonus: Selects all text on click so user can type over 0 immediately */
+        className="w-full p-1 text-xs border rounded outline-none focus:border-safety-500 bg-white text-slate-700"
+    />
+</div>
+                                  <div>
+                                      <label className="text-[10px] text-slate-400 uppercase">Area</label>
+    <input 
+        type="number"
+        inputMode="decimal" /* Triggers decimal keyboard on mobile */
+        step="any"          /* Allows decimals (prevents 'integer only' errors) */
+        min="0"
+        value={group.area}
+        /* Logic: If empty, set 0. Otherwise parse Float. */
+        onChange={(e) => handleGroupChange(group.id, 'area', e.target.value === '' ? 0 : parseFloat(e.target.value))}
+        onFocus={(e) => e.target.select()} 
+        className="w-full p-1 text-xs border rounded outline-none focus:border-safety-500 bg-white text-slate-700"
+    />
+                                  </div>
+                               </div>
+                               <select 
+                                 value={group.unit}
+                                 onChange={(e) => handleGroupChange(group.id, 'unit', e.target.value)}
+                                 className="w-full text-[10px] p-1 border rounded bg-white outline-none"
+                               >
+                                  <option value="SqMeter">Sq Meters</option>
+                                  <option value="Vaar">Vaar</option>
+                                  <option value="Vigha">Vigha</option>
+                               </select>
+                           </div>
+                        ))}
+                    </div>
+
+                    <button onClick={handleAddGroup} className="mt-3 w-full py-2 text-xs font-bold text-safety-600 border border-dashed border-safety-300 rounded hover:bg-safety-50 transition-colors flex items-center justify-center gap-1">
+                        <Plus size={14} /> Add Group
+                    </button>
+                 </div>
+
+                 {/* Right: Visualization Grid */}
+                 <div className="flex-1 flex flex-col">
+                    <div className="flex justify-between items-end mb-4">
+                       <div>
+                          <label className={labelClass}>Total Plots</label>
+                          <div className="text-2xl font-bold text-slate-800">{totalPlotsCalculated}</div>
+                       </div>
+                       <div className="flex gap-3 text-[10px] font-bold pb-1">
+                          <div className="flex items-center gap-1"><div className="w-2 h-2 bg-slate-100 border border-slate-300 rounded"></div> Avail</div>
+                          <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-500 rounded"></div> Booked</div>
+                          <div className="flex items-center gap-1"><div className="w-2 h-2 bg-red-500 rounded"></div> Sold</div>
+                       </div>
+                    </div>
+
+                    <div className="bg-slate-100 p-4 rounded-xl flex-1 min-h-[300px] overflow-y-auto custom-scrollbar border border-slate-200 inner-shadow">
+                       {/* Flex Wrap Container for Variable Sizes */}
+                       <div className="flex flex-wrap gap-3 content-start">
+                          {flattenedPlots.map((plot) => {
+                             const status = plotsStatus[plot.index] || 'available';
+                             
+                             // Style Logic
+                             let bgClass = "bg-white hover:bg-slate-50 border-slate-300 text-slate-600";
+                             if (status === 'booked') bgClass = "bg-emerald-500 border-emerald-600 text-white shadow-emerald-200";
+                             if (status === 'sold') bgClass = "bg-red-500 border-red-600 text-white shadow-red-200";
+
+                             // Dynamic Size Logic
+                             // Base size ~60px. Max size ~100px.
+                             // Ratio: (ThisArea - MinArea) / (MaxArea - MinArea)
+                             const minSize = 60;
+                             const maxSize = 110;
+                             let sizePx = minSize;
+                             
+                             if (maxArea > minArea) {
+                                 const ratio = (plot.areaSqMt - minArea) / (maxArea - minArea);
+                                 sizePx = minSize + (ratio * (maxSize - minSize));
+                             }
+
+                             return (
+                                <button
+                                   key={plot.index}
+                                   onClick={() => cyclePlotStatus(plot.index)}
+                                   style={{ width: `${sizePx}px`, height: `${sizePx}px` }}
+                                   className={`rounded-xl border shadow-sm flex flex-col items-center justify-center transition-all active:scale-95 ${bgClass} relative overflow-hidden`}
+                                   title={`Plot ${plot.index + 1}: ${plot.displayArea} ${plot.unit}`}
+                                >
+                                   <span className="font-bold text-sm z-10">{plot.index + 1}</span>
+                                   <span className="text-[9px] opacity-70 z-10 leading-none mt-0.5">{plot.displayArea}</span>
+                                   {/* Subtle Pattern for larger plots */}
+                                   {sizePx > 80 && <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-black to-transparent" />}
+                                </button>
+                             );
+                          })}
+                       </div>
+                    </div>
+                    
+                    <div className="mt-3 flex justify-between text-xs font-bold text-slate-400">
                        <span className="text-emerald-600">Booked: {plotsStatus.filter(s => s === 'booked').length}</span>
                        <span className="text-red-500">Sold: {plotsStatus.filter(s => s === 'sold').length}</span>
                     </div>
