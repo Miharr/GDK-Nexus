@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -5,47 +6,94 @@ import {
   LayoutGrid, 
   Hexagon, 
   ArrowRight,
-  Construction,
   History
 } from 'lucide-react';
 import { Loader } from './components/Loader';
 import { LandDealStructurer } from './components/LandDealStructurer';
 import { ProjectHistory } from './components/ProjectHistory';
-import { ProjectSavedState } from './types';
+import { PlottingDashboard } from './components/PlottingDashboard';
+import { ProjectSavedState, PlottingState } from './types';
+import { supabase } from './supabaseClient';
 
-type ViewState = 'dashboard' | 'loading' | 'land-structurer' | 'plotting' | 'history';
+// plotting-list: The list view to select a project before plotting
+type ViewState = 'dashboard' | 'loading' | 'land-structurer' | 'plotting-list' | 'plotting' | 'history';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>('dashboard');
-  // State to hold data loaded from history to pass into the Structurer
- const [loadedProjectData, setLoadedProjectData] = useState<ProjectSavedState | undefined>(undefined);
+  
+  // State to hold data loaded from history
+  const [loadedProjectData, setLoadedProjectData] = useState<ProjectSavedState | undefined>(undefined);
+  const [loadedPlottingData, setLoadedPlottingData] = useState<PlottingState | undefined>(undefined);
   const [loadedProjectId, setLoadedProjectId] = useState<number | undefined>(undefined);
 
-  const handleModuleSelect = (view: ViewState) => {
-    // If we are going to structurer from dashboard directly, reset any loaded data
+  const handleModuleSelect = async (view: ViewState) => {
+    // 1. Show Loader
+    setCurrentView('loading');
+    
+    // 2. Logic for Module 1 (Reset)
     if (view === 'land-structurer') {
       setLoadedProjectData(undefined);
       setLoadedProjectId(undefined);
+      setLoadedPlottingData(undefined);
     }
-    setCurrentView('loading');
     
-    // Simulate system loading time
+    // 3. Logic for Module 2 (Routing)
+    // When clicking Plotting, we ALWAYS go to the selection list first
+    let targetView = view;
+    if (view === 'plotting') {
+        targetView = 'plotting-list';
+    }
+
+    // 4. Navigate
     setTimeout(() => {
-      setCurrentView(view);
-    }, 1100);
+      setCurrentView(targetView);
+    }, 800);
   };
 
   const handleBackToDash = () => {
     setCurrentView('dashboard');
   };
 
-    const handleLoadProject = (data: ProjectSavedState, id: number) => {
+  // Handler for Module 1 loading from History
+  const handleLoadProject = (data: ProjectSavedState, id: number) => {
     setLoadedProjectData(data);
     setLoadedProjectId(id);
+    setLoadedPlottingData(undefined);
+    
     setCurrentView('loading');
     setTimeout(() => {
       setCurrentView('land-structurer');
     }, 1000);
+  };
+
+  // Handler for Module 2 loading from Selection List
+  const handleLoadPlottingProject = async (data: ProjectSavedState, id: number) => {
+    setLoadedProjectData(data);
+    setLoadedProjectId(id);
+    
+    // Show loader while fetching plotting specific data
+    setCurrentView('loading');
+
+    try {
+        const { data: dbData, error } = await supabase
+          .from('projects')
+          .select('plotting_data')
+          .eq('id', id)
+          .single();
+          
+        if (!error && dbData && dbData.plotting_data) {
+          setLoadedPlottingData(dbData.plotting_data);
+        } else {
+          setLoadedPlottingData(undefined); // Start fresh if no plotting data
+        }
+    } catch (err) {
+        console.error("Error fetching plotting data:", err);
+        setLoadedPlottingData(undefined);
+    }
+
+    setTimeout(() => {
+      setCurrentView('plotting');
+    }, 800);
   };
 
   return (
@@ -72,10 +120,10 @@ const App: React.FC = () => {
           <motion.div
             key="dashboard"
             className="relative z-10 flex flex-col h-screen p-6 md:p-12 overflow-y-auto"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.6 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1}}
+            exit={{ opacity: 0,}}
+            transition={{ duration: 0 }}
           >
             {/* Header */}
             <header className="flex justify-between items-center mb-16 md:mb-24">
@@ -157,8 +205,43 @@ const App: React.FC = () => {
             />
           </motion.div>
         )}
+        
+       {/* --- VIEW: MODULE 2 SELECTION LIST --- */}
+       {currentView === 'plotting-list' && (
+           <motion.div
+            key="module-2-list"
+            className="absolute inset-0 z-10 bg-[#F1F5F9] overflow-y-auto"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+           >
+              <ProjectHistory 
+                mode="select"
+                onBack={handleBackToDash}
+                onLoadProject={handleLoadPlottingProject}
+              />
+           </motion.div>
+       )}
 
-       {/* --- VIEW: MODULE 2 (PROJECT HISTORY) --- */}
+       {/* --- VIEW: MODULE 2 (PLOTTING DASHBOARD) --- */}
+       {currentView === 'plotting' && loadedProjectData && loadedProjectId && (
+          <motion.div
+            key="module-2"
+            className="absolute inset-0 z-10 bg-[#F1F5F9] overflow-y-auto"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+             <PlottingDashboard 
+               onBack={() => setCurrentView('plotting-list')} // Back goes to list, not dash
+               projectData={loadedProjectData}
+               existingPlottingData={loadedPlottingData}
+               projectId={loadedProjectId}
+             />
+          </motion.div>
+       )}
+
+       {/* --- VIEW: MODULE 3 (PROJECT HISTORY) --- */}
         {currentView === 'history' && (
            <motion.div
            key="module-history"
@@ -167,36 +250,11 @@ const App: React.FC = () => {
            animate={{ opacity: 1 }}
            exit={{ opacity: 0 }}
          >
-           {/* @ts-ignore - Ignore type mismatch for now as we updated the handler signature */}
-           <ProjectHistory onBack={handleBackToDash} onLoadProject={handleLoadProject} />
+           <ProjectHistory 
+             onBack={handleBackToDash} 
+             onLoadProject={(data, id) => handleLoadProject(data, id)} 
+           />
          </motion.div>
-        )}
-
-        {/* --- VIEW: PLACEHOLDERS --- */}
-        {currentView === 'plotting' && (
-          <motion.div
-            key="placeholder"
-            className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#F1F5F9]"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <div className="bg-[#F1F5F9] p-12 text-center max-w-md mx-4 rounded-3xl shadow-[8px_8px_16px_#cbd5e1,-8px_-8px_16px_#ffffff] border border-white/50">
-              <div className="w-20 h-20 mx-auto mb-6 text-safety-500 bg-gray-100 rounded-full flex items-center justify-center shadow-inner">
-                <Construction size={40} />
-              </div>
-              <h2 className="text-2xl font-bold text-slate-800 mb-2">Module Offline</h2>
-              <p className="text-slate-500 mb-8">
-                This sector of the Nexus is currently under development. Access restricted.
-              </p>
-              <button 
-                onClick={handleBackToDash}
-                className="bg-safety-500 text-white px-6 py-3 font-bold rounded-xl shadow-[4px_4px_8px_#cbd5e1,-4px_-4px_8px_#ffffff] hover:bg-safety-600 transition-all active:shadow-inner"
-              >
-                Return to Command
-              </button>
-            </div>
-          </motion.div>
         )}
 
       </AnimatePresence>
@@ -219,9 +277,9 @@ const NeuCard: React.FC<NeuCardProps> = ({ title, subtitle, icon, delay, onClick
     <motion.button
       onClick={onClick}
       className="group relative flex flex-col h-72 w-full overflow-hidden p-10 text-left transition-all duration-300 bg-[#F1F5F9] rounded-[2rem] border border-white/60 shadow-[9px_9px_18px_#cbd5e1,-9px_-9px_18px_#ffffff] hover:shadow-[12px_12px_24px_#cbd5e1,-12px_-12px_24px_#ffffff] active:shadow-[inset_6px_6px_12px_#cbd5e1,inset_-6px_-6px_12px_#ffffff]"
-      initial={{ opacity: 0, y: 50 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay: delay }}
+      initial={{ opacity: 0}}
+      animate={{ opacity: 1}}
+      transition={{ duration: 0}}
     >
       {/* Main Icon */}
       <div className="mb-auto relative z-10">

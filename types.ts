@@ -1,3 +1,4 @@
+
 export type UnitType = 'SqMeter' | 'Vaar' | 'Vigha' | 'Guntha' | 'SqKm';
 
 export interface LandIdentity {
@@ -85,6 +86,25 @@ export interface ProjectSavedState {
   costSheetBasis: '100' | '60';
 }
 
+// --- NEW TYPES FOR PLOTTING MODULE ---
+
+export interface PlottingDevExpense {
+  id: string; // uuid for list management
+  description: string;
+  amount: number | '';
+}
+
+export type PlotStatus = 'available' | 'booked' | 'sold';
+
+export interface PlottingState {
+  deductionPercent: number | '';
+  developmentExpenses: PlottingDevExpense[];
+  totalPlots: number | '';
+  plotsStatus: PlotStatus[];
+  expectedSalesRate: number | '';
+  salesRateUnit: UnitType;
+}
+
 export interface ProjectRow {
   id: number;
   created_at: string;
@@ -92,4 +112,5 @@ export interface ProjectRow {
   village_name: string;
   total_land_cost: number;
   full_data: ProjectSavedState;
+  plotting_data?: PlottingState;
 }

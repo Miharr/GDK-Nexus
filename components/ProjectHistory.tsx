@@ -9,7 +9,8 @@ import {
   Calendar,
   MapPin,
   IndianRupee,
-  AlertCircle
+  AlertCircle,
+  CheckCircle2
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { ProjectRow, ProjectSavedState } from '../types';
@@ -17,10 +18,11 @@ import { formatCurrency, formatDate } from '../utils/formatters';
 
 interface Props {
   onBack: () => void;
-  onLoadProject: (data: ProjectSavedState) => void;
+  onLoadProject: (data: ProjectSavedState, id: number) => void;
+  mode?: 'manage' | 'select'; // 'manage' = History (Open/Delete), 'select' = Plotting (Load only)
 }
 
-export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject }) => {
+export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject, mode = 'manage' }) => {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -56,25 +58,21 @@ export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject }) => {
   };
 
   const handleDelete = async (id: number) => {
-    // 1. Confirm deletion (Optional: Remove this line if you want no confirmation)
+    //if (!window.confirm("Are you sure you want to delete this project permanently?")) return;
 
-    // 2. Optimistic Update: Remove from UI immediately so it feels fast
     const previousProjects = [...projects];
     setProjects(prev => prev.filter(p => p.id !== id));
 
     try {
-      // 3. Send Delete Command to Database
       const { error } = await supabase
         .from('projects')
         .delete()
         .eq('id', id);
 
-      // 4. Handle Permission/Database Errors
       if (error) {
         throw error;
       }
     } catch (err: any) {
-      // 5. Rollback: If database failed (e.g. Permission denied), put the item back
       console.error('Delete failed:', err);
       setProjects(previousProjects); 
       alert(`Delete failed: ${err.message}`);
@@ -86,11 +84,9 @@ export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject }) => {
       alert('Project data is corrupted or missing.');
       return;
     }
-    // Pass ID along with data
     onLoadProject(project.full_data, project.id);
   };
 
-  // Filter Logic
   const filteredProjects = projects.filter(p => {
     const searchLower = searchTerm.toLowerCase();
     return (
@@ -98,6 +94,8 @@ export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject }) => {
       (p.village_name?.toLowerCase().includes(searchLower) || '')
     );
   });
+
+  const isSelectMode = mode === 'select';
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 animate-in fade-in duration-500 font-sans pb-12">
@@ -111,9 +109,16 @@ export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject }) => {
             </button>
             <div>
               <h1 className="text-lg md:text-xl font-bold flex items-center gap-2 text-slate-900">
-                <History className="text-safety-500 h-5 w-5" />
-                Project Archives
+                {isSelectMode ? (
+                   <CheckCircle2 className="text-emerald-500 h-6 w-6" />
+                ) : (
+                   <History className="text-safety-500 h-5 w-5" />
+                )}
+                {isSelectMode ? 'Select Base Project' : 'Project Archives'}
               </h1>
+              {isSelectMode && (
+                <p className="text-xs text-slate-400">Choose a Land Acquisition project to proceed with Plotting</p>
+              )}
             </div>
           </div>
         </div>
@@ -139,7 +144,7 @@ export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject }) => {
         {loading ? (
           <div className="text-center py-20 text-slate-400">
              <div className="animate-spin w-8 h-8 border-2 border-safety-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-             Loading archives...
+             Loading...
           </div>
         ) : error ? (
           <div className="text-center py-20 text-red-500 flex flex-col items-center gap-2">
@@ -183,17 +188,21 @@ export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject }) => {
                   <button 
                     onClick={() => handleLoad(project)}
                     type="button"
-                    className="bg-blue-50 text-blue-600 hover:bg-blue-100 flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+                    className={`${isSelectMode ? 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-emerald-200 shadow-lg' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'} flex-1 md:flex-none px-6 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all`}
                   >
-                    <FolderOpen size={16} /> Open
+                    {isSelectMode ? <CheckCircle2 size={18} /> : <FolderOpen size={16} />}
+                    {isSelectMode ? 'Load & Proceed' : 'Open'}
                   </button>
-                  <button 
-                    onClick={() => handleDelete(project.id)}
-                    type="button"
-                    className="text-red-400 hover:text-red-600 hover:bg-red-50 flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
-                  >
-                    <Trash2 size={16} /> Delete
-                  </button>
+                  
+                  {!isSelectMode && (
+                    <button 
+                        onClick={() => handleDelete(project.id)}
+                        type="button"
+                        className="text-red-400 hover:text-red-600 hover:bg-red-50 flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+                    >
+                        <Trash2 size={16} /> Delete
+                    </button>
+                  )}
                 </div>
 
               </div>
