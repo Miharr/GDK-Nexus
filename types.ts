@@ -113,17 +113,35 @@ export interface PlotGroup {
 
 export type PlotStatus = 'available' | 'booked' | 'sold';
 
+export interface PlotSaleItem {
+  id: string;
+  plotNumber: number;
+  customerName: string;
+  phoneNumber: string;
+  bookingDate: string;
+  dimLengthFt: number | '';
+  dimWidthFt: number | '';
+  areaVaar: number; // Calculated: (L * W) / 9
+}
+
 export interface PlottingState {
-  deductionPercent: number | '';
+  // Tile 1: Project Cost
+  landRate: number | ''; 
+  devRate: number | '';  
+  
+  // Tile 2: Dev Expenses
   developmentExpenses: PlottingDevExpense[];
-  
-  // Inventory State
-  plotGroups: PlotGroup[]; // New field for groups
-  totalPlots: number | ''; // Kept for backward compat / calculated
-  plotsStatus: PlotStatus[];
-  
-  expectedSalesRate: number | '';
-  salesRateUnit: UnitType;
+
+  // Tile 3: Plot Sales (New)
+  plotSales: PlotSaleItem[];
+
+  // Legacy/Unused fields (Kept for type safety if needed)
+  deductionPercent?: number | '';
+  totalPlots?: number | ''; 
+  plotsStatus?: PlotStatus[];
+  plotGroups?: any[];
+  expectedSalesRate?: number | '';
+  salesRateUnit?: UnitType;
 }
 
 export interface ProjectRow {
