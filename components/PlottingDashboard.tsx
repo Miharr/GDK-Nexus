@@ -1,17 +1,14 @@
-
-
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ArrowLeft, 
   Save, 
-  LayoutGrid, 
-  TrendingUp, 
+  IndianRupee, 
   HardHat, 
-  PieChart as PieChartIcon,
   Plus,
   Trash2,
   CheckCircle,
-  Settings2
+  AlertCircle,
+  Users
 } from 'lucide-react';
 import { Card } from './Card';
 import { supabase } from '../supabaseClient';
@@ -19,14 +16,13 @@ import {
   ProjectSavedState, 
   PlottingState, 
   PlottingDevExpense, 
-  PlotStatus,
-  UnitType,
-  PlotGroup
+  UnitType
 } from '../types';
 import { formatCurrency, formatInputNumber, parseInputNumber } from '../utils/formatters';
 
 interface Props {
   onBack: () => void;
+  onOpenMenu: () => void;
   projectData: ProjectSavedState;
   existingPlottingData?: PlottingState;
   projectId: number;
@@ -40,192 +36,79 @@ const CONVERSION_RATES = {
   SqKm: 4.00
 };
 
-export const PlottingDashboard: React.FC<Props> = ({ onBack, projectData, existingPlottingData, projectId }) => {
+export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, projectData, existingPlottingData, projectId }) => {
   
   // --- STATE ---
-  const [deductionPercent, setDeductionPercent] = useState<number | ''>(40);
-  const [devExpenses, setDevExpenses] = useState<PlottingDevExpense[]>([
+  const [landRate, setLandRate] = useState<number | ''>('');
+  const [devRate, setDevRate] = useState<number | ''>('');
+  
+const [devExpenses, setDevExpenses] = useState<PlottingDevExpense[]>([
     { id: '1', description: 'Compound Wall', amount: '' },
     { id: '2', description: 'Internal Roads', amount: '' },
     { id: '3', description: 'Entry Gate', amount: '' },
   ]);
-  
-  // New Inventory State
-  const [plotGroups, setPlotGroups] = useState<PlotGroup[]>([
-    { id: '1', count: 10, area: 100, unit: 'SqMeter' }
-  ]);
-  
-  const [plotsStatus, setPlotsStatus] = useState<PlotStatus[]>([]);
-  const [expectedSalesRate, setExpectedSalesRate] = useState<number | ''>('');
-  const [salesRateUnit, setSalesRateUnit] = useState<UnitType>('SqMeter');
+
+  // New State: Plot Sales
+  const [plotSales, setPlotSales] = useState<PlotSaleItem[]>([]);
+
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  const [areaInVaar, setAreaInVaar] = useState<number>(0);
 
   // --- INITIALIZATION ---
   useEffect(() => {
-    if (existingPlottingData) {
-      setDeductionPercent(existingPlottingData.deductionPercent);
-      setDevExpenses(existingPlottingData.developmentExpenses || []);
-      setPlotsStatus(existingPlottingData.plotsStatus || []);
-      setExpectedSalesRate(existingPlottingData.expectedSalesRate);
-      setSalesRateUnit(existingPlottingData.salesRateUnit || 'SqMeter');
-      
-      // Load groups if exist, else default
-      if (existingPlottingData.plotGroups && existingPlottingData.plotGroups.length > 0) {
-        setPlotGroups(existingPlottingData.plotGroups);
-      } else if (existingPlottingData.totalPlots) {
-        // Fallback for old data: Create one group with the total plots
-        setPlotGroups([{ 
-            id: 'legacy', 
-            count: existingPlottingData.totalPlots, 
-            area: 100, // Placeholder area
-            unit: 'SqMeter' 
-        }]);
-      }
+    // 1. Calculate Base Area in Vaar from Acquisition Module
+    if (projectData) {
+        const m = projectData.measurements;
+        let baseVal = 0;
+        let baseUnit: UnitType = 'Vaar';
+
+        // Priority 1: User defined Plotted Area in Module 1
+        if (m.plottedArea && Number(m.plottedArea) > 0) {
+            baseVal = Number(m.plottedArea);
+            baseUnit = m.plottedUnit || 'Vaar';
+        } else {
+            // Priority 2: Calculate 60% of Total Area as fallback
+            const inputVal = Number(m.areaInput) || 0;
+            let valInVigha = 0;
+            if (m.inputUnit === 'Vigha') valInVigha = inputVal;
+            else valInVigha = inputVal / CONVERSION_RATES[m.inputUnit];
+            
+            const fpVigha = valInVigha * 0.60;
+            baseVal = fpVigha;
+            baseUnit = 'Vigha';
+        }
+
+        // Convert whatever we found into VAAR for consistency
+        const calculatedVaar = baseVal * (CONVERSION_RATES.Vaar / CONVERSION_RATES[baseUnit]);
+        setAreaInVaar(calculatedVaar);
     }
-  }, [existingPlottingData]);
 
-  // Sync Plots Status Array size with Total Calculated Plots
-  const totalPlotsCalculated = useMemo(() => {
-    return plotGroups.reduce((sum, g) => sum + (g.count === '' ? 0 : g.count), 0);
-  }, [plotGroups]);
-
-  useEffect(() => {
-    const count = totalPlotsCalculated;
-    setPlotsStatus(prev => {
-      if (prev.length === count) return prev;
-      if (prev.length > count) return prev.slice(0, count);
-      // Add new plots as available
-      return [...prev, ...Array(count - prev.length).fill('available')];
-    });
-  }, [totalPlotsCalculated]);
+// 2. Load Saved Data
+    if (existingPlottingData) {
+      setLandRate(existingPlottingData.landRate || '');
+      setDevRate(existingPlottingData.devRate || '');
+      setDevExpenses(existingPlottingData.developmentExpenses || []);
+      setPlotSales(existingPlottingData.plotSales || []);
+    }
+  }, [existingPlottingData, projectData]);
 
   // --- CALCULATIONS ---
-
-  // 1. Reconstruct Base Land Metrics from Module 1 Data
-  const baseMetrics = useMemo(() => {
-    const { measurements, financials, overheads, costSheetBasis } = projectData;
-    
-    // Area
-    const inputVal = measurements.areaInput === '' ? 0 : Number(measurements.areaInput);
-    let valInVigha = 0;
-    if (measurements.inputUnit === 'Vigha') valInVigha = inputVal;
-    else valInVigha = inputVal / CONVERSION_RATES[measurements.inputUnit];
-    
-    const totalSqMt = valInVigha * CONVERSION_RATES.SqMeter;
-    
-    // Jantri
-    const jantriRate = measurements.jantriRate === '' ? 0 : Number(measurements.jantriRate);
-    const totalJantriValue = totalSqMt * jantriRate;
-    const fpJantriValue = (totalSqMt * 0.60) * jantriRate;
-
-    // Financials
-    const pricePerVigha = financials.pricePerVigha === '' ? 0 : Number(financials.pricePerVigha);
-    const dealPrice = pricePerVigha * valInVigha;
-
-    // Expenses
-    const stampPercent = overheads.stampDutyPercent === '' ? 0 : Number(overheads.stampDutyPercent);
-    
-    // Stamp Duty
-    let stampDuty = 0;
-    if (costSheetBasis === '60') {
-       stampDuty = fpJantriValue * (stampPercent / 100);
-    } else {
-       stampDuty = totalJantriValue * (stampPercent / 100);
-    }
-    
-    const additionalExpExcludingDev = 
-      (overheads.architectFees === '' ? 0 : Number(overheads.architectFees)) +
-      (overheads.planPassFees === '' ? 0 : Number(overheads.planPassFees)) +
-      (overheads.naExpense === '' ? 0 : Number(overheads.naExpense)) +
-      (overheads.naPremium === '' ? 0 : Number(overheads.naPremium));
-
-    // For display here, we only use acquisition costs. The Dev cost is added later in "Total Project Cost"
-    const landedCostWithoutDev = dealPrice + stampDuty + additionalExpExcludingDev;
-
-    return { 
-        totalSqMt, 
-        landedCostWithoutDev, 
-        valInVigha, 
-        dealPrice, 
-        stampDuty, 
-        additionalExpExcludingDev, 
-        jantriRate,
-        costSheetBasis 
-    };
-  }, [projectData]);
-
-  // 2. Plotting Calculations
-  const dedPct = deductionPercent === '' ? 0 : deductionPercent;
-  const netSaleableSqMt = baseMetrics.totalSqMt * (1 - dedPct / 100);
   
-  const totalDevExpense = devExpenses.reduce((sum, item) => sum + (item.amount === '' ? 0 : item.amount), 0);
-  
-  // Total Project Cost = (Acquisition + Stamp + Other Overheads) + (Plotting Dev Expenses)
-  const totalProjectCost = baseMetrics.landedCostWithoutDev + totalDevExpense;
+  // Card 1: Project Cost (Rate Based)
+  const totalLandAmount = (Number(landRate) || 0) * areaInVaar;
+  const totalDevAmount = (Number(devRate) || 0) * areaInVaar;
+  const grandTotalCost = totalLandAmount + totalDevAmount;
 
-  // Unit Costs
-  // Raw Land Cost = (Acquisition Only) / Total Area
-  const rawLandCostPerSqMt = baseMetrics.totalSqMt > 0 ? baseMetrics.landedCostWithoutDev / baseMetrics.totalSqMt : 0;
-  
-  // Loaded Land Cost = (Acquisition Only) / Saleable Area
-  const loadedLandCostPerSqMt = netSaleableSqMt > 0 ? baseMetrics.landedCostWithoutDev / netSaleableSqMt : 0;
-  
-  // Finished Cost = (Total Project Cost) / Saleable Area
-  const finishedCostPerSqMt = netSaleableSqMt > 0 ? totalProjectCost / netSaleableSqMt : 0;
+  // Card 2: Dev Expenses (List Based)
+  const totalDevExpenseList = devExpenses.reduce((sum, item) => sum + (item.amount === '' ? 0 : item.amount), 0);
 
-  // Conversion for Display
-  const getRateInUnit = (ratePerSqMt: number, unit: UnitType) => {
-    return ratePerSqMt * (CONVERSION_RATES.SqMeter / CONVERSION_RATES[unit]);
-  };
-
-  const finishedCostDisplay = getRateInUnit(finishedCostPerSqMt, salesRateUnit);
-
-  // Profit
-  const saleRate = expectedSalesRate === '' ? 0 : expectedSalesRate;
-  const netSaleableInVigha = baseMetrics.valInVigha * (1 - dedPct/100);
-  const netSaleableInSalesUnit = netSaleableInVigha * CONVERSION_RATES[salesRateUnit];
-  
-  const projectedRevenue = netSaleableInSalesUnit * saleRate;
-  const netProfit = projectedRevenue - totalProjectCost;
-  const roi = totalProjectCost > 0 ? (netProfit / totalProjectCost) * 100 : 0;
-
-  // --- FLATTEN PLOTS FOR GRID RENDERING ---
-  const flattenedPlots = useMemo(() => {
-    const plots: { index: number, areaSqMt: number, displayArea: number, unit: UnitType }[] = [];
-    let currentIndex = 0;
-
-    plotGroups.forEach(group => {
-      const count = group.count === '' ? 0 : group.count;
-      const area = group.area === '' ? 0 : group.area;
-      // Convert to SqMt for uniform sizing logic
-      const areaInSqMt = area * (CONVERSION_RATES.SqMeter / CONVERSION_RATES[group.unit]);
-      
-      for (let i = 0; i < count; i++) {
-        plots.push({
-          index: currentIndex,
-          areaSqMt: areaInSqMt,
-          displayArea: area,
-          unit: group.unit
-        });
-        currentIndex++;
-      }
-    });
-    return plots;
-  }, [plotGroups]);
-
-  // Calculate Grid Sizing Metrics
-  const { minArea, maxArea } = useMemo(() => {
-      if (flattenedPlots.length === 0) return { minArea: 100, maxArea: 100 };
-      const areas = flattenedPlots.map(p => p.areaSqMt);
-      return { 
-          minArea: Math.min(...areas), 
-          maxArea: Math.max(...areas) 
-      };
-  }, [flattenedPlots]);
-
+  // Card 3: Utilization Logic
+  const totalAllocatedVaar = plotSales.reduce((sum, p) => sum + (p.areaVaar || 0), 0);
+  const remainingVaar = areaInVaar - totalAllocatedVaar;
+  const isOverLimit = remainingVaar < 0;
+  const utilizationPercent = areaInVaar > 0 ? (totalAllocatedVaar / areaInVaar) * 100 : 0;
 
   // --- HANDLERS ---
-  
   const handleAddExpense = () => {
     setDevExpenses([...devExpenses, { id: crypto.randomUUID(), description: '', amount: '' }]);
   };
@@ -238,66 +121,83 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, projectData, existi
     setDevExpenses(devExpenses.map(e => e.id === id ? { ...e, [field]: value } : e));
   };
 
-  // Group Handlers
-  const handleAddGroup = () => {
-    setPlotGroups([...plotGroups, { id: crypto.randomUUID(), count: 0, area: 0, unit: 'SqMeter' }]);
+  // --- PLOT SALES HANDLERS ---
+  const handleAddPlot = () => {
+    const nextNum = plotSales.length + 1;
+    setPlotSales([...plotSales, {
+      id: crypto.randomUUID(),
+      plotNumber: nextNum,
+      customerName: '',
+      phoneNumber: '',
+      bookingDate: new Date().toISOString().split('T')[0], // Default today
+      dimLengthFt: '',
+      dimWidthFt: '',
+      areaVaar: 0
+    }]);
   };
 
-  const handleRemoveGroup = (id: string) => {
-    setPlotGroups(plotGroups.filter(g => g.id !== id));
+  const handleRemovePlot = (id: string) => {
+    const confirm = window.confirm("Delete this plot entry?");
+    if(confirm) {
+        setPlotSales(prev => prev.filter(p => p.id !== id));
+    }
   };
 
-  const handleGroupChange = (id: string, field: keyof PlotGroup, value: any) => {
-    setPlotGroups(plotGroups.map(g => g.id === id ? { ...g, [field]: value } : g));
-  };
+  const handlePlotChange = (id: string, field: keyof PlotSaleItem, value: any) => {
+    setPlotSales(prev => prev.map(plot => {
+      if (plot.id !== id) return plot;
 
+      const updatedPlot = { ...plot, [field]: value };
 
-  const cyclePlotStatus = (index: number) => {
-    const statuses: PlotStatus[] = ['available', 'booked', 'sold'];
-    const current = plotsStatus[index] || 'available';
-    const next = statuses[(statuses.indexOf(current) + 1) % statuses.length];
-    
-    const newStatus = [...plotsStatus];
-    newStatus[index] = next;
-    setPlotsStatus(newStatus);
+      // Auto-Calculate Area in Vaar if dimensions change
+      // Formula: (Length_ft * Width_ft) / 9
+      if (field === 'dimLengthFt' || field === 'dimWidthFt') {
+         const l = field === 'dimLengthFt' ? (Number(value) || 0) : (Number(plot.dimLengthFt) || 0);
+         const w = field === 'dimWidthFt' ? (Number(value) || 0) : (Number(plot.dimWidthFt) || 0);
+         
+         const areaSqFt = l * w;
+         const calculatedVaar = areaSqFt / 9; // 9 SqFt = 1 SqYard/Vaar
+         updatedPlot.areaVaar = parseFloat(calculatedVaar.toFixed(2));
+      }
+
+      return updatedPlot;
+    }));
   };
 
   const handleSave = async () => {
     if (!projectId) return;
 
-    // 1. Calculate the new total for Development Cost from the list
-    const calculatedDevCost = devExpenses.reduce((sum, item) => sum + (item.amount === '' ? 0 : item.amount), 0);
-
-    // 2. Prepare Plotting Data
+   // 1. Prepare Plotting Data (Saving rates + list + sales)
     const plottingData: PlottingState = {
-      deductionPercent,
+      landRate,
+      devRate,
       developmentExpenses: devExpenses,
-      totalPlots: totalPlotsCalculated,
-      plotGroups, // Save the groups configuration
-      plotsStatus,
-      expectedSalesRate,
-      salesRateUnit
+      plotSales: plotSales, // Save the new list
+      
+      // Defaults for removed features to satisfy Types
+      deductionPercent: existingPlottingData?.deductionPercent || 0,
+      totalPlots: existingPlottingData?.totalPlots || 0,
+      plotGroups: existingPlottingData?.plotGroups || [],
+      plotsStatus: existingPlottingData?.plotsStatus || [],
+      expectedSalesRate: existingPlottingData?.expectedSalesRate || '',
+      salesRateUnit: existingPlottingData?.salesRateUnit || 'Vaar'
     };
 
-    // 3. Update Module 1 Data (full_data)
+    // 2. Sync Logic: Update Module 1 "Development Cost" with the List Total
     const updatedFullData: ProjectSavedState = {
-       ...projectData,
-       overheads: {
-          ...projectData.overheads,
-          developmentCost: calculatedDevCost 
-       }
+        ...projectData,
+        overheads: {
+            ...projectData.overheads,
+            developmentCost: totalDevExpenseList
+        }
     };
-
-    // 4. Recalculate Total
-    const newTotalLandCost = baseMetrics.landedCostWithoutDev + calculatedDevCost;
 
     try {
       const { error } = await supabase
         .from('projects')
         .update({ 
             plotting_data: plottingData,
-            full_data: updatedFullData, 
-            total_land_cost: newTotalLandCost
+            full_data: updatedFullData // This ensures Module 1 stays in sync
         }) 
         .eq('id', projectId);
 
@@ -307,7 +207,7 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, projectData, existi
       setTimeout(() => setShowSaveSuccess(false), 2000);
     } catch (err: any) {
       console.error("Save error", err);
-      alert("Failed to save plotting data");
+      alert("Failed to save data");
     }
   };
 
@@ -325,104 +225,111 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, projectData, existi
              <button onClick={onBack} type="button" className="w-10 h-10 rounded-full flex items-center justify-center bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">
                 <ArrowLeft size={20} />
              </button>
-            <div className="hidden sm:block">
+            <div>
               <h1 className="text-lg md:text-xl font-bold flex items-center gap-2 text-slate-900">
-                <LayoutGrid className="text-safety-500 h-5 w-5" />
-                Plotting & Inventory
+                <IndianRupee className="text-safety-500 h-5 w-5" />
+                Plotting Costs
               </h1>
               <div className="text-xs text-slate-400 font-mono">
-                 Project: {projectData.identity.village} - {projectData.identity.fpNumber}
+                 Project: {projectData.identity.village}
               </div>
             </div>
           </div>
           <button onClick={handleSave} type="button" className="bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 shadow hover:bg-slate-900 transition-all">
-            <Save size={16} /> <span className="hidden md:inline">Save & Sync</span>
+            <Save size={16} /> <span className="hidden md:inline">Save</span>
           </button>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 md:px-8 mt-8 grid grid-cols-1 md:grid-cols-12 gap-6 pb-20">
+      <main className="max-w-7xl mx-auto px-4 md:px-8 mt-8 grid grid-cols-1 md:grid-cols-2 gap-6 pb-20">
         
-        {/* 1. Base Info */}
-        <div className="md:col-span-4">
-          <Card title="Source Land" icon={<PieChartIcon size={20} />} className="h-full">
-            <div className="flex flex-col gap-4">
-               <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 relative">
-                  <div className="text-xs text-slate-400 font-bold uppercase mb-1">Base Land Cost</div>
-                  <div className="text-xl font-bold text-slate-900">{formatCurrency(baseMetrics.landedCostWithoutDev)}</div>
-                  <div className="text-[10px] text-slate-400 mt-1">Excludes Development</div>
-                  {baseMetrics.costSheetBasis === '60' && (
-                     <div className="absolute top-4 right-4 text-[10px] font-bold bg-blue-100 text-blue-600 px-2 py-0.5 rounded">60% Basis</div>
-                  )}
-               </div>
-               <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
-                      <div className="text-xs text-slate-400 font-bold uppercase mb-1">Total Area</div>
-                      <div className="text-lg font-bold text-slate-800">{baseMetrics.totalSqMt.toFixed(0)}</div>
-                      <div className="text-[10px] text-slate-400">Sq. Meters</div>
+        {/* 1. Project Cost (Rate Based) */}
+        <div className="md:col-span-1">
+          <Card title="Project Cost" icon={<IndianRupee size={20} />} className="h-full">
+            <div className="space-y-5">
+               {/* Plotted Area Display */}
+               <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200">
+                  <span className="text-xs font-bold text-slate-500 uppercase">Plotted Area</span>
+                  <div className="text-right">
+                     <span className="text-lg font-bold text-slate-900">{formatInputNumber(areaInVaar)}</span>
+                     <span className="text-[10px] font-bold text-slate-400 block uppercase">Vaar</span>
                   </div>
-                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
-                      <div className="text-xs text-slate-400 font-bold uppercase mb-1">In Vigha</div>
-                      <div className="text-lg font-bold text-slate-800">{baseMetrics.valInVigha.toFixed(2)}</div>
-                      <div className="text-[10px] text-slate-400">Vigha</div>
+               </div>
+
+               {/* Land Rate Row */}
+               <div className="grid grid-cols-12 gap-2 items-end">
+                  <div className="col-span-5">
+                     <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Land Rate</label>
+                     <input 
+                       type="text" 
+                       inputMode="decimal"
+                       value={formatInputNumber(landRate)} 
+                       onChange={e => setLandRate(parseInputNumber(e.target.value))} 
+                       className={inputClass} 
+                       placeholder="₹ / Vaar" 
+                     />
+                  </div>
+                  <div className="col-span-7">
+                     <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block text-right">Total Plot Amount</label>
+                     <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-right font-mono font-bold text-slate-700 text-sm">
+                        {formatCurrency(totalLandAmount)}
+                     </div>
+                  </div>
+               </div>
+
+               {/* Development Rate Row */}
+               <div className="grid grid-cols-12 gap-2 items-end">
+                  <div className="col-span-5">
+                     <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Dev Rate</label>
+                     <input 
+                       type="text" 
+                       inputMode="decimal"
+                       value={formatInputNumber(devRate)} 
+                       onChange={e => setDevRate(parseInputNumber(e.target.value))} 
+                       className={inputClass} 
+                       placeholder="₹ / Vaar" 
+                     />
+                  </div>
+                  <div className="col-span-7">
+                     <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block text-right">Total Dev Fees</label>
+                     <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-right font-mono font-bold text-blue-600 text-sm">
+                        {formatCurrency(totalDevAmount)}
+                     </div>
+                  </div>
+               </div>
+
+               {/* Total Display Tile */}
+               <div className="mt-2 bg-slate-800 text-white p-4 rounded-xl shadow-lg shadow-slate-200">
+                  <div className="flex justify-between items-center">
+                     <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Total Project Cost</span>
+                     <span className="text-xl font-bold font-mono text-safety-500">{formatCurrency(grandTotalCost)}</span>
                   </div>
                </div>
             </div>
           </Card>
         </div>
 
-        {/* 2. Kapat Calculator */}
-        <div className="md:col-span-4">
-           <Card title="Deductions (Kapat)" icon={<PieChartIcon size={20} />} className="h-full">
-              <div className="space-y-6">
-                 <div>
-                    <div className="flex justify-between items-center mb-2">
-                       <label className={labelClass}>Deduction % (Road/Common)</label>
-                       <span className="text-safety-600 font-bold">{deductionPercent}%</span>
-                    </div>
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="60" 
-                      value={deductionPercent} 
-                      onChange={e => setDeductionPercent(e.target.value === '' ? '' : Number(e.target.value))}
-                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-safety-500"
-                    />
-                    <div className="flex justify-between text-[10px] text-slate-400 mt-1">
-                       <span>0%</span><span>20%</span><span>40%</span><span>60%</span>
-                    </div>
-                 </div>
-
-                 <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
-                    <div className="text-xs text-blue-400 font-bold uppercase mb-1">Net Saleable Area</div>
-                    <div className="text-2xl font-bold text-blue-700">{netSaleableSqMt.toFixed(0)} <span className="text-sm font-medium">SqMt</span></div>
-                    <div className="text-xs text-blue-500 mt-1">Efficiency: {deductionPercent !== '' ? 100 - deductionPercent : 100}%</div>
-                 </div>
-              </div>
-           </Card>
-        </div>
-
-        {/* 3. Dev Expenses */}
-        <div className="md:col-span-4">
-           <Card title="Development Costs" icon={<HardHat size={20} />} className="h-full">
+       {/* 2. Development Expenses (List Based) */}
+        <div className="md:col-span-1">
+           <Card title="Dev Expenses List" icon={<HardHat size={20} />} className="h-full">
               <div className="flex flex-col h-full">
-                 <div className="flex-1 space-y-2 overflow-y-auto max-h-[200px] pr-2 custom-scrollbar">
+                 <div className="flex-1 space-y-2 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar">
                     {devExpenses.map((item, idx) => (
                        <div key={item.id} className="flex gap-2 items-center">
                           <input 
                             type="text" 
-                            placeholder="Description"
-                            value={item.description}
-                            onChange={(e) => handleExpenseChange(item.id, 'description', e.target.value)}
-                            className={`${inputClass} flex-1 text-xs`}
+                            placeholder="Description" 
+                            value={item.description} 
+                            onChange={(e) => handleExpenseChange(item.id, 'description', e.target.value)} 
+                            className={`${inputClass} flex-1 text-xs`} 
                           />
                           <input 
                             type="text"
                             inputMode="decimal" 
-                            placeholder="Amount"
-                            value={item.amount}
-                            onChange={(e) => handleExpenseChange(item.id, 'amount', parseInputNumber(e.target.value))}
-                            className={`${inputClass} w-24 text-right text-xs`}
+                            placeholder="Amount" 
+                            value={formatInputNumber(item.amount)} 
+                            onChange={(e) => handleExpenseChange(item.id, 'amount', parseInputNumber(e.target.value))} 
+                            className={`${inputClass} w-24 text-right text-xs`} 
                           />
                           <button onClick={() => handleRemoveExpense(item.id)} className="text-slate-400 hover:text-red-500">
                              <Trash2 size={16} />
@@ -432,230 +339,161 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, projectData, existi
                  </div>
                  
                  <button onClick={handleAddExpense} className="mt-4 flex items-center justify-center gap-2 text-xs font-bold text-safety-600 border border-safety-200 rounded-lg py-2 hover:bg-safety-50 transition-colors">
-                    <Plus size={14} /> Add Expense
+                    <Plus size={14} /> Add Expense Item
                  </button>
 
                  <div className="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center">
-                    <span className="text-xs font-bold text-slate-500 uppercase">Total Dev Cost</span>
-                    <span className="font-bold text-slate-900">{formatCurrency(totalDevExpense)}</span>
+                    <span className="text-xs font-bold text-slate-500 uppercase">Total List Sum</span>
+                    <span className="font-bold text-slate-900">{formatCurrency(totalDevExpenseList)}</span>
                  </div>
               </div>
            </Card>
         </div>
 
-        {/* 4. Unit Costing */}
-        <div className="md:col-span-12">
-           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {/* Card A: Raw */}
-              <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm relative overflow-hidden group">
-                 <div className="absolute top-0 left-0 w-1 h-full bg-slate-300"></div>
-                 <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Raw Land Cost</div>
-                 <div className="text-2xl font-bold text-slate-700">{formatCurrency(getRateInUnit(rawLandCostPerSqMt, salesRateUnit))}</div>
-                 <div className="text-[10px] text-slate-400 mt-1">Per {salesRateUnit} on Total Area</div>
-              </div>
-
-              {/* Card B: Loaded */}
-              <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm relative overflow-hidden group">
-                 <div className="absolute top-0 left-0 w-1 h-full bg-safety-300"></div>
-                 <div className="text-xs font-bold text-safety-500 uppercase tracking-wider mb-2">Loaded Land Cost</div>
-                 <div className="text-2xl font-bold text-slate-800">{formatCurrency(getRateInUnit(loadedLandCostPerSqMt, salesRateUnit))}</div>
-                 <div className="text-[10px] text-slate-400 mt-1">Base Cost / Saleable Area</div>
-                 <div className="absolute top-4 right-4 text-xs font-bold text-red-500 bg-red-50 px-2 py-1 rounded">
-                    +{deductionPercent}% Load
-                 </div>
-              </div>
-
-              {/* Card C: Finished */}
-              <div className="bg-slate-800 border border-slate-700 p-6 rounded-2xl shadow-lg relative overflow-hidden">
-                 <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
-                 <div className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2">Finished Cost (Break Even)</div>
-                 <div className="text-3xl font-bold text-white">{formatCurrency(finishedCostDisplay)}</div>
-                 <div className="text-[10px] text-slate-400 mt-1">Includes Land + Development</div>
-              </div>
-           </div>
-        </div>
-
-        {/* 5. Profit Projector */}
-        <div className="md:col-span-4">
-           <Card title="Profit Projector" icon={<TrendingUp size={20} />} className="h-full">
-              <div className="space-y-6">
-                 <div>
-                    <div className="flex justify-between items-center mb-1">
-                       <label className={labelClass}>Expected Sales Rate</label>
-                       <select 
-                          value={salesRateUnit} 
-                          onChange={(e) => setSalesRateUnit(e.target.value as UnitType)}
-                          className="text-[10px] font-bold bg-slate-100 border-none rounded px-2 py-0.5 outline-none"
-                       >
-                          <option value="SqMeter">Per SqMt</option>
-                          <option value="Vaar">Per Vaar</option>
-                          <option value="Vigha">Per Vigha</option>
-                       </select>
-                    </div>
-                    <div className="relative">
-                       <input 
-                         type="text"
-                         inputMode="decimal"
-                         value={formatInputNumber(expectedSalesRate)}
-                         onChange={(e) => setExpectedSalesRate(parseInputNumber(e.target.value))}
-                         className={`${inputClass} pl-8 text-lg font-bold text-emerald-600`}
-                         placeholder="0.00"
-                       />
-                       <span className="absolute left-3 top-3 text-slate-400 font-bold">₹</span>
-                    </div>
-                 </div>
-
-                 {/* REFACTORED: Stacked Layout for Profit/ROI */}
-                 <div className="flex flex-col gap-5 pt-4 border-t border-slate-100 mt-2">
-                    <div>
-                       <div className="text-xs text-slate-400 font-bold uppercase mb-1">Net Profit</div>
-                       <div className={`text-2xl font-bold tracking-tight ${netProfit >= 0 ? 'text-emerald-600' : 'text-red-500'} break-words leading-tight`}>
-                          {formatCurrency(netProfit)}
-                       </div>
-                    </div>
-                    <div>
-                       <div className="text-xs text-slate-400 font-bold uppercase mb-1">Return on Investment (ROI)</div>
-                       <div className={`text-xl font-bold ${roi >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                          {roi.toFixed(2)}%
-                       </div>
-                    </div>
-                 </div>
-
-                 <div className="bg-slate-50 p-3 rounded text-xs text-slate-500 leading-relaxed mt-2">
-                    At a rate of <strong>{formatCurrency(saleRate)}</strong> per {salesRateUnit}, the project yields a revenue of {formatCurrency(projectedRevenue)}.
-                 </div>
-              </div>
-           </Card>
-        </div>
-
-        {/* 6. Inventory Grid & Configuration */}
-        <div className="md:col-span-8">
-           <Card title="Inventory Management" icon={<LayoutGrid size={20} />} className="h-full">
-              <div className="flex flex-col md:flex-row gap-6 h-full">
+        {/* 3. Plot Sales (Full Width) */}
+        <div className="md:col-span-2">
+           <Card title="Plot Sales" icon={<Users size={20} />}>
+              <div className="space-y-4">
                  
-                 {/* Left: Configuration List */}
-                 <div className="w-full md:w-1/3 flex flex-col border-b md:border-b-0 md:border-r border-slate-100 pb-4 md:pb-0 md:pr-4">
-                    <div className="flex items-center gap-2 mb-3 text-slate-600">
-                        <Settings2 size={16} />
-                        <h4 className="text-xs font-bold uppercase">Plot Configuration</h4>
-                    </div>
-                    
-                    <div className="flex-1 space-y-3 overflow-y-auto max-h-[250px] custom-scrollbar">
-                        {plotGroups.map((group) => (
-                           <div key={group.id} className="bg-slate-50 p-2 rounded-lg border border-slate-200 text-xs">
-                               <div className="flex justify-between items-center mb-2">
-                                   <span className="font-bold text-slate-500">Group</span>
-                                   <button onClick={() => handleRemoveGroup(group.id)} className="text-slate-400 hover:text-red-500">
-                                       <Trash2 size={14} />
-                                   </button>
-                               </div>
-                               <div className="grid grid-cols-2 gap-2 mb-2">
-                                  <div>
-    <label className="text-[10px] text-slate-400 uppercase">Count</label>
-    <input 
-        type="number" 
-        inputMode="numeric" /* integers typically for count */
-        min="0"
-        value={group.count}
-        /* Logic: If empty, set 0. Otherwise parse Int. */
-        onChange={(e) => handleGroupChange(group.id, 'count', e.target.value === '' ? 0 : parseInt(e.target.value))}
-        onFocus={(e) => e.target.select()} /* UX Bonus: Selects all text on click so user can type over 0 immediately */
-        className="w-full p-1 text-xs border rounded outline-none focus:border-safety-500 bg-white text-slate-700"
-    />
-</div>
-                                  <div>
-                                      <label className="text-[10px] text-slate-400 uppercase">Area</label>
-    <input 
-        type="number"
-        inputMode="decimal" /* Triggers decimal keyboard on mobile */
-        step="any"          /* Allows decimals (prevents 'integer only' errors) */
-        min="0"
-        value={group.area}
-        /* Logic: If empty, set 0. Otherwise parse Float. */
-        onChange={(e) => handleGroupChange(group.id, 'area', e.target.value === '' ? 0 : parseFloat(e.target.value))}
-        onFocus={(e) => e.target.select()} 
-        className="w-full p-1 text-xs border rounded outline-none focus:border-safety-500 bg-white text-slate-700"
-    />
-                                  </div>
-                               </div>
-                               <select 
-                                 value={group.unit}
-                                 onChange={(e) => handleGroupChange(group.id, 'unit', e.target.value)}
-                                 className="w-full text-[10px] p-1 border rounded bg-white outline-none"
-                               >
-                                  <option value="SqMeter">Sq Meters</option>
-                                  <option value="Vaar">Vaar</option>
-                                  <option value="Vigha">Vigha</option>
-                               </select>
-                           </div>
-                        ))}
-                    </div>
-
-                    <button onClick={handleAddGroup} className="mt-3 w-full py-2 text-xs font-bold text-safety-600 border border-dashed border-safety-300 rounded hover:bg-safety-50 transition-colors flex items-center justify-center gap-1">
-                        <Plus size={14} /> Add Group
-                    </button>
-                 </div>
-
-                 {/* Right: Visualization Grid */}
-                 <div className="flex-1 flex flex-col">
-                    <div className="flex justify-between items-end mb-4">
+                 {/* Land Utilization Tracker */}
+                 <div className={`p-4 rounded-xl border ${isOverLimit ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
+                    <div className="flex justify-between items-end mb-2">
                        <div>
-                          <label className={labelClass}>Total Plots</label>
-                          <div className="text-2xl font-bold text-slate-800">{totalPlotsCalculated}</div>
+                          <div className="text-xs font-bold uppercase text-slate-400 mb-1">Land Utilization</div>
+                          <div className="flex items-baseline gap-2">
+                             <span className={`text-xl font-bold ${isOverLimit ? 'text-red-600' : 'text-slate-800'}`}>
+                                {formatInputNumber(totalAllocatedVaar)}
+                             </span>
+                             <span className="text-sm text-slate-400">/ {formatInputNumber(areaInVaar)} Vaar</span>
+                          </div>
                        </div>
-                       <div className="flex gap-3 text-[10px] font-bold pb-1">
-                          <div className="flex items-center gap-1"><div className="w-2 h-2 bg-slate-100 border border-slate-300 rounded"></div> Avail</div>
-                          <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-500 rounded"></div> Booked</div>
-                          <div className="flex items-center gap-1"><div className="w-2 h-2 bg-red-500 rounded"></div> Sold</div>
-                       </div>
-                    </div>
-
-                    <div className="bg-slate-100 p-4 rounded-xl flex-1 min-h-[300px] overflow-y-auto custom-scrollbar border border-slate-200 inner-shadow">
-                       {/* Flex Wrap Container for Variable Sizes */}
-                       <div className="flex flex-wrap gap-3 content-start">
-                          {flattenedPlots.map((plot) => {
-                             const status = plotsStatus[plot.index] || 'available';
-                             
-                             // Style Logic
-                             let bgClass = "bg-white hover:bg-slate-50 border-slate-300 text-slate-600";
-                             if (status === 'booked') bgClass = "bg-emerald-500 border-emerald-600 text-white shadow-emerald-200";
-                             if (status === 'sold') bgClass = "bg-red-500 border-red-600 text-white shadow-red-200";
-
-                             // Dynamic Size Logic
-                             // Base size ~60px. Max size ~100px.
-                             // Ratio: (ThisArea - MinArea) / (MaxArea - MinArea)
-                             const minSize = 60;
-                             const maxSize = 110;
-                             let sizePx = minSize;
-                             
-                             if (maxArea > minArea) {
-                                 const ratio = (plot.areaSqMt - minArea) / (maxArea - minArea);
-                                 sizePx = minSize + (ratio * (maxSize - minSize));
-                             }
-
-                             return (
-                                <button
-                                   key={plot.index}
-                                   onClick={() => cyclePlotStatus(plot.index)}
-                                   style={{ width: `${sizePx}px`, height: `${sizePx}px` }}
-                                   className={`rounded-xl border shadow-sm flex flex-col items-center justify-center transition-all active:scale-95 ${bgClass} relative overflow-hidden`}
-                                   title={`Plot ${plot.index + 1}: ${plot.displayArea} ${plot.unit}`}
-                                >
-                                   <span className="font-bold text-sm z-10">{plot.index + 1}</span>
-                                   <span className="text-[9px] opacity-70 z-10 leading-none mt-0.5">{plot.displayArea}</span>
-                                   {/* Subtle Pattern for larger plots */}
-                                   {sizePx > 80 && <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-black to-transparent" />}
-                                </button>
-                             );
-                          })}
+                       <div className="text-right">
+                          <div className="text-xs font-bold uppercase text-slate-400 mb-1">Remaining</div>
+                          <div className={`text-lg font-bold ${isOverLimit ? 'text-red-600' : 'text-emerald-600'}`}>
+                             {formatInputNumber(remainingVaar)} <span className="text-xs font-medium">Vaar</span>
+                          </div>
                        </div>
                     </div>
                     
-                    <div className="mt-3 flex justify-between text-xs font-bold text-slate-400">
-                       <span className="text-emerald-600">Booked: {plotsStatus.filter(s => s === 'booked').length}</span>
-                       <span className="text-red-500">Sold: {plotsStatus.filter(s => s === 'sold').length}</span>
+                    {/* Progress Bar */}
+                    <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
+                       <div 
+                          className={`h-full transition-all duration-500 ${isOverLimit ? 'bg-red-500' : 'bg-emerald-500'}`}
+                          style={{ width: `${Math.min(utilizationPercent, 100)}%` }}
+                       />
                     </div>
+                    
+                    {isOverLimit && (
+                       <div className="mt-2 flex items-center gap-2 text-xs font-bold text-red-600">
+                          <AlertCircle size={14} />
+                          Warning: You have allocated more land than available!
+                       </div>
+                    )}
                  </div>
+
+                 <div className="overflow-x-auto rounded-lg border border-slate-200">
+                    <table className="w-full text-sm text-left border-collapse min-w-[900px]">
+                       <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-200">
+                          <tr>
+                             <th className="px-3 py-3 w-12 text-center">#</th>
+                             <th className="px-3 py-3">Customer Info</th>
+                             <th className="px-3 py-3 w-32">Date</th>
+                             <th className="px-3 py-3 w-48 text-center">Dimensions (ft)</th>
+                             <th className="px-3 py-3 w-28 text-right">Area (Vaar)</th>
+                             <th className="px-3 py-3 w-40 text-right">Pricing</th>
+                             <th className="px-3 py-3 w-10"></th>
+                          </tr>
+                       </thead>
+                       <tbody className="divide-y divide-slate-100 bg-white">
+                          {plotSales.map((plot, idx) => (
+                             <tr key={plot.id} className="hover:bg-slate-50 transition-colors group">
+                                <td className="px-3 py-2 text-center font-bold text-slate-400">{idx + 1}</td>
+                                <td className="px-3 py-2">
+                                   <input 
+                                      type="text" 
+                                      placeholder="Customer Name" 
+                                      value={plot.customerName}
+                                      onChange={(e) => handlePlotChange(plot.id, 'customerName', e.target.value)}
+                                      className={`${inputClass} mb-1`}
+                                   />
+                                   <input 
+                                      type="text" 
+                                      inputMode="tel"
+                                      placeholder="Phone Number" 
+                                      value={plot.phoneNumber}
+                                      onChange={(e) => handlePlotChange(plot.id, 'phoneNumber', e.target.value)}
+                                      className={`${inputClass} text-xs text-slate-500`}
+                                   />
+                                </td>
+                                <td className="px-3 py-2">
+                                   <input 
+                                      type="date" 
+                                      value={plot.bookingDate}
+                                      onChange={(e) => handlePlotChange(plot.id, 'bookingDate', e.target.value)}
+                                      className={`${inputClass} text-xs`}
+                                   />
+                                </td>
+                                <td className="px-3 py-2">
+                                   <div className="flex items-center gap-2 justify-center">
+                                      <input 
+                                         type="number" 
+                                         inputMode="decimal"
+                                         placeholder="L" 
+                                         value={plot.dimLengthFt}
+                                         onChange={(e) => handlePlotChange(plot.id, 'dimLengthFt', e.target.value)}
+                                         className={`${inputClass} w-16 text-center`}
+                                      />
+                                      <span className="text-slate-300">x</span>
+                                      <input 
+                                         type="number" 
+                                         inputMode="decimal"
+                                         placeholder="W" 
+                                         value={plot.dimWidthFt}
+                                         onChange={(e) => handlePlotChange(plot.id, 'dimWidthFt', e.target.value)}
+                                         className={`${inputClass} w-16 text-center`}
+                                      />
+                                   </div>
+                                </td>
+                               <td className="px-3 py-2 text-right">
+                                   <div className="font-bold text-slate-800 text-lg">{plot.areaVaar}</div>
+                                   <div className="text-[9px] text-slate-400 uppercase font-bold">Vaar</div>
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                   <div className="flex flex-col gap-1 text-xs">
+                                      <div className="flex justify-between gap-2">
+                                         <span className="text-slate-400">Land:</span>
+                                         <span className="font-medium text-slate-700">
+                                            {formatCurrency(plot.areaVaar * (Number(landRate) || 0))}
+                                         </span>
+                                      </div>
+                                      <div className="flex justify-between gap-2">
+                                         <span className="text-slate-400">Dev:</span>
+                                         <span className="font-medium text-blue-600">
+                                            {formatCurrency(plot.areaVaar * (Number(devRate) || 0))}
+                                         </span>
+                                      </div>
+                                      <div className="border-t border-slate-100 mt-1 pt-1 flex justify-between gap-2 font-bold text-safety-600">
+                                         <span>Total:</span>
+                                         <span>
+                                            {formatCurrency(plot.areaVaar * ((Number(landRate) || 0) + (Number(devRate) || 0)))}
+                                         </span>
+                                      </div>
+                                   </div>
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                   <button onClick={() => handleRemovePlot(plot.id)} className="text-slate-300 hover:text-red-500 transition-colors">
+                                      <Trash2 size={16} />
+                                   </button>
+                                </td>
+                             </tr>
+                          ))}
+                       </tbody>
+                    </table>
+                 </div>
+                 
+                 <button onClick={handleAddPlot} className="w-full flex items-center justify-center gap-2 text-sm font-bold text-safety-600 border border-dashed border-safety-300 rounded-xl py-3 hover:bg-safety-50 transition-colors">
+                    <Plus size={18} /> Add New Plot Sale
+                 </button>
               </div>
            </Card>
         </div>
@@ -667,7 +505,7 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, projectData, existi
         <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
           <div className="bg-emerald-500 text-white px-6 py-4 rounded-2xl shadow-2xl flex flex-col items-center gap-2 animate-in zoom-in duration-300">
             <CheckCircle size={32} strokeWidth={3} />
-            <span className="font-bold text-lg">Inventory & Costs Updated</span>
+            <span className="font-bold text-lg">Saved Successfully</span>
           </div>
         </div>
       )}
