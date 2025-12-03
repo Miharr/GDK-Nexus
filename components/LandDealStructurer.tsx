@@ -14,7 +14,9 @@ import {
   Clock,
   ArrowDown,
   CheckCircle,
-  Save
+  Save,
+  Plus,
+  Trash2
 } from 'lucide-react';
 import { Card } from './Card';
 import { SummaryChart } from './SummaryChart';
@@ -68,6 +70,8 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData, initi
     inputUnit: 'SqMeter',
     displayUnit: 'Vigha', 
     jantriRate: '',
+    plottedArea: '', // New Field
+    plottedUnit: 'Vaar' // Default Unit
   });
 
   const [analysisUnit, setAnalysisUnit] = useState<UnitType>('Vigha');
@@ -90,6 +94,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData, initi
     naExpense: '',
     naPremium: '',
     developmentCost: '',
+    customExpenses: [] // New Field
   });
 
   const [costSheetBasis, setCostSheetBasis] = useState<'100' | '60'>('100');
@@ -190,28 +195,51 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData, initi
     }
 
     // 8. Totals
+    const totalCustomExpenses = (overheads.customExpenses || []).reduce((sum, item) => sum + getNum(item.amount), 0);
+
     const totalAdditionalExpenses = 
       getNum(overheads.architectFees) + 
       getNum(overheads.planPassFees) + 
       getNum(overheads.naExpense) + 
       getNum(overheads.naPremium) + 
-      getNum(overheads.developmentCost);
+      getNum(overheads.developmentCost) + 
+      totalCustomExpenses;
 
     const landedCost100 = calculatedDealPrice + stampDuty100 + totalAdditionalExpenses;
     const landedCost60 = calculatedDealPrice + stampDuty60 + totalAdditionalExpenses;
     const grandTotalPayment = schedule.reduce((sum, item) => sum + item.amount, 0);
 
-    // 9. Metric Calculations (100% & 60%)
-    const costPerSqMt100 = totalSqMt > 0 ? landedCost100 / totalSqMt : 0;
-    const costPerVaar100 = totalVaar > 0 ? landedCost100 / totalVaar : 0;
-    const costPerVigha100 = valInVigha > 0 ? landedCost100 / valInVigha : 0;
-
-    const fpVaar = totalVaar * 0.60;
-    const fpVigha = valInVigha * 0.60;
+    // 9. Metric Calculations
+    // Logic: If Plotted Area is entered, convert it and use it as the denominator.
     
-    const costPerSqMt60 = fpAreaSqMt > 0 ? landedCost60 / fpAreaSqMt : 0;
-    const costPerVaar60 = fpVaar > 0 ? landedCost60 / fpVaar : 0;
-    const costPerVigha60 = fpVigha > 0 ? landedCost60 / fpVigha : 0;
+    // Calculate Plotted Area in all units
+    const plottedVal = getNum(measurements.plottedArea);
+    let plottedInVigha = 0;
+    if (plottedVal > 0) {
+       // Convert whatever unit user selected (Vaar/SqMt) into Vigha for base calc
+       if (measurements.plottedUnit === 'Vigha') plottedInVigha = plottedVal;
+       else plottedInVigha = plottedVal / CONVERSION_RATES[measurements.plottedUnit || 'SqMeter'];
+    }
+    
+    // Denominators for 100% Basis
+    // If plotted area exists, use it. Otherwise use Total Land Area.
+    const denomVigha100 = plottedInVigha > 0 ? plottedInVigha : valInVigha;
+    const denomSqMt100  = plottedInVigha > 0 ? plottedInVigha * CONVERSION_RATES.SqMeter : totalSqMt;
+    const denomVaar100  = plottedInVigha > 0 ? plottedInVigha * CONVERSION_RATES.Vaar : totalVaar;
+
+    // Denominators for 60% Basis
+    // If plotted area exists, use it. Otherwise use FP Area (60%).
+    const denomVigha60 = plottedInVigha > 0 ? plottedInVigha : (valInVigha * 0.60);
+    const denomSqMt60  = plottedInVigha > 0 ? plottedInVigha * CONVERSION_RATES.SqMeter : (totalSqMt * 0.60);
+    const denomVaar60  = plottedInVigha > 0 ? plottedInVigha * CONVERSION_RATES.Vaar : (totalVaar * 0.60);
+
+    const costPerSqMt100 = denomSqMt100 > 0 ? landedCost100 / denomSqMt100 : 0;
+    const costPerVaar100 = denomVaar100 > 0 ? landedCost100 / denomVaar100 : 0;
+    const costPerVigha100 = denomVigha100 > 0 ? landedCost100 / denomVigha100 : 0;
+    
+    const costPerSqMt60 = denomSqMt60 > 0 ? landedCost60 / denomSqMt60 : 0;
+    const costPerVaar60 = denomVaar60 > 0 ? landedCost60 / denomVaar60 : 0;
+    const costPerVigha60 = denomVigha60 > 0 ? landedCost60 / denomVigha60 : 0;
 
     setResult({
       totalSqMt, fpAreaSqMt, inputInVigha: valInVigha, fpInVigha,
@@ -252,7 +280,8 @@ const handleClear = () => {
       planPassFees: '', 
       naExpense: '', 
       naPremium: '', 
-      developmentCost: '' 
+      developmentCost: '' ,
+      customExpenses: []
     });
 
     setAnalysisUnit('Vigha');
@@ -389,7 +418,7 @@ const handleClear = () => {
     }));
   };
 
-  const handleDpAmountChange = (val: string) => {
+const handleDpAmountChange = (val: string) => {
     const amt = parseInputNumber(val);
     const totalDeal = (Number(financials.pricePerVigha) || 0) * (result?.inputInVigha || 0);
     let pct: number | '' = '';
@@ -397,6 +426,30 @@ const handleClear = () => {
         pct = parseFloat(((amt / totalDeal) * 100).toFixed(2));
     }
     setFinancials(prev => ({ ...prev, downPaymentAmount: amt, downPaymentPercent: pct }));
+  };
+
+  // Custom Expense Handlers
+  const addCustomExpense = () => {
+    setOverheads(prev => ({
+      ...prev,
+      customExpenses: [...(prev.customExpenses || []), { id: Math.random().toString(), name: '', amount: '' }]
+    }));
+  };
+
+  const updateCustomExpense = (id: string, field: 'name' | 'amount', val: string) => {
+    setOverheads(prev => ({
+      ...prev,
+      customExpenses: (prev.customExpenses || []).map(item => 
+        item.id === id ? { ...item, [field]: field === 'amount' ? parseInputNumber(val) : val } : item
+      )
+    }));
+  };
+
+  const removeCustomExpense = (id: string) => {
+    setOverheads(prev => ({
+      ...prev,
+      customExpenses: (prev.customExpenses || []).filter(item => item.id !== id)
+    }));
   };
 
   const getNum = (val: number | string) => (val === '' ? 0 : Number(val));
@@ -518,10 +571,33 @@ const handleClear = () => {
                  </div>
               </div>
 
-              <div className="grid grid-cols-1">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className={labelClass}>Jantri Rate (₹/SqMt)</label>
                   <input type="number" inputMode="decimal" autoComplete="off" value={measurements.jantriRate} onChange={e => setMeasurements({...measurements, jantriRate: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" />
+                </div>
+                <div>
+                  <label className={labelClass}>Plotted Area (Sellable)</label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="number" 
+                      inputMode="decimal" 
+                      value={measurements.plottedArea || ''} 
+                      onChange={e => setMeasurements({...measurements, plottedArea: e.target.value === '' ? '' : Number(e.target.value)})} 
+                      className={inputClass} 
+                      placeholder="Area" 
+                    />
+                    <select 
+                      value={measurements.plottedUnit || 'Vaar'} 
+                      onChange={e => setMeasurements({...measurements, plottedUnit: e.target.value as UnitType})} 
+                      className="bg-white border border-slate-300 text-slate-800 text-sm rounded-lg outline-none w-24"
+                    >
+                        <option value="SqMeter">Sq Mt</option>
+                        <option value="Vaar">Vaar</option>
+                        <option value="Vigha">Vigha</option>
+                        <option value="Guntha">Guntha</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
@@ -703,7 +779,25 @@ const handleClear = () => {
                 <div><label className={labelClass}>Plan Pass Fees</label><input type="number" inputMode="decimal" autoComplete="off" value={overheads.planPassFees} onChange={e => setOverheads({...overheads, planPassFees: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
                 <div><label className={labelClass}>NA Expense</label><input type="number" inputMode="decimal" autoComplete="off" value={overheads.naExpense} onChange={e => setOverheads({...overheads, naExpense: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
                 <div><label className={labelClass}>NA Premium</label><input type="number" inputMode="decimal" autoComplete="off" value={overheads.naPremium} onChange={e => setOverheads({...overheads, naPremium: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
-                <div className="col-span-2"><label className={labelClass}>Development Cost</label><input type="number" autoComplete="off" value={overheads.developmentCost} onChange={e => setOverheads({...overheads, developmentCost: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
+              <div className="col-span-2"><label className={labelClass}>Development Cost</label><input type="number" inputMode="decimal" autoComplete="off" value={overheads.developmentCost} onChange={e => setOverheads({...overheads, developmentCost: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
+                
+                {/* Custom Expenses List */}
+                <div className="col-span-2 border-t border-slate-100 pt-3 mt-1">
+                   <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Extra Expenses</label>
+                   <div className="space-y-2">
+                      {(overheads.customExpenses || []).map(item => (
+                        <div key={item.id} className="flex gap-2">
+                           <input type="text" placeholder="Name" value={item.name} onChange={e => updateCustomExpense(item.id, 'name', e.target.value)} className={`${inputClass} !py-1.5`} />
+                           <input type="text" inputMode="decimal" placeholder="Amount" value={formatInputNumber(item.amount)} onChange={e => updateCustomExpense(item.id, 'amount', e.target.value)} className={`${inputClass} !py-1.5 w-24 text-right`} />
+                           <button onClick={() => removeCustomExpense(item.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button>
+                        </div>
+                      ))}
+                   </div>
+                   <button onClick={addCustomExpense} className="mt-2 text-xs flex items-center gap-1 bg-slate-100 px-3 py-1.5 rounded-full hover:bg-slate-200 font-bold text-slate-600 transition-colors">
+                      <Plus size={12} /> Add Expense
+                   </button>
+                </div>
+
               </div>
             </div>
           </Card>
@@ -743,6 +837,15 @@ const handleClear = () => {
                       {getNum(overheads.naExpense) > 0 && <div className="flex justify-between text-xs text-slate-400 pl-2"><span>- NA Exp</span><span>{formatCurrency(Number(overheads.naExpense))}</span></div>}
                       {getNum(overheads.naPremium) > 0 && <div className="flex justify-between text-xs text-slate-400 pl-2"><span>- NA Prem</span><span>{formatCurrency(Number(overheads.naPremium))}</span></div>}
                       {getNum(overheads.developmentCost) > 0 && <div className="flex justify-between text-xs text-slate-400 pl-2"><span>- Dev Cost</span><span>{formatCurrency(Number(overheads.developmentCost))}</span></div>}
+                      {/* Custom Expenses Display */}
+                      {(overheads.customExpenses || []).map(item => (
+                        getNum(item.amount) > 0 && (
+                          <div key={item.id} className="flex justify-between text-xs text-slate-400 pl-2">
+                            <span>- {item.name || 'Extra'}</span>
+                            <span>{formatCurrency(Number(item.amount))}</span>
+                          </div>
+                        )
+                      ))}
                     </div>
 
                     <div className="flex justify-between items-center bg-slate-900 p-4 rounded-lg mt-4 shadow-lg shadow-slate-300 border border-slate-800 relative overflow-hidden">
@@ -768,12 +871,12 @@ const handleClear = () => {
         </div>
 
         {/* 6. Unit Costs */}
-        {result && (
+       {result && (
           <div className="md:col-span-12">
              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                  {['Sq Mt', 'Vaar', 'Vigha'].map((u, i) => (
                    <div key={u} className="bg-white border border-slate-200 p-6 rounded-xl text-center shadow-sm flex flex-col justify-center">
-                      <div className="text-xs text-slate-400 font-bold uppercase mb-2 tracking-wider">Cost / {u}</div>
+                      <div className="text-xs text-slate-400 font-bold uppercase mb-2 tracking-wider">Cost / {u} {measurements.plottedArea ? '(Plotted)' : '(Total)'}</div>
                       <div className="text-2xl font-bold text-slate-800">{formatCurrency(i===0 ? displayCostPerSqMt : i===1 ? displayCostPerVaar : displayCostPerVigha)}</div>
                    </div>
                  ))}
@@ -783,7 +886,7 @@ const handleClear = () => {
 
         {/* 7. Payment Schedule */}
         <div className="md:col-span-12">
-          <Card title="7. Payment Schedule" icon={<CalendarDays size={20} />}>
+          <Card title="6. Payment Schedule" icon={<CalendarDays size={20} />}>
             {result ? (
               <div className="flex flex-col h-full">
                 <div className={`mb-6 border p-4 rounded-lg flex justify-between items-center ${costSheetBasis === '100' ? 'bg-slate-50 border-slate-200' : 'bg-blue-50 border-blue-100'}`}>
@@ -980,6 +1083,16 @@ const handleClear = () => {
                        {getNum(overheads.naPremium) > 0 && <tr><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>NA Premium</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.naPremium))}</td></tr>}
                        {getNum(overheads.developmentCost) > 0 && <tr><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>Development Cost</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.developmentCost))}</td></tr>}
                        
+                       {/* Custom Expenses List in PDF */}
+                       {(overheads.customExpenses || []).map(item => (
+                          getNum(item.amount) > 0 && (
+                            <tr key={item.id}>
+                              <td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{item.name || 'Extra Expense'}</td>
+                              <td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(item.amount))}</td>
+                            </tr>
+                          )
+                       ))}
+
                        {/* Total Additional Expenses Subtotal */}
                        <tr style={{ backgroundColor: '#f9fafb' }}>
                           <td style={{ padding: '6px 8px', fontWeight: 'bold', color: '#4b5563', fontSize: '11px' }}>Total Additional Expenses</td>
