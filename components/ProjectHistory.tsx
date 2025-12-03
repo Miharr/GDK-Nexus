@@ -7,7 +7,7 @@ import {
   FolderOpen, 
   History, 
   Calendar,
-  MapPin,
+  PieChart,
   IndianRupee,
   AlertCircle,
   CheckCircle2
@@ -169,8 +169,10 @@ export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject, mode = 
                   
                   <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-500 mt-2">
                     <div className="flex items-center gap-1.5">
-                      <MapPin size={14} className="text-safety-500" />
-                      {project.village_name || 'Unknown Village'}
+                      <PieChart size={14} className="text-safety-500" />
+                      <span className="font-medium">
+                        {project.full_data?.costSheetBasis || '100'}% Basis
+                      </span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Calendar size={14} className="text-safety-500" />
