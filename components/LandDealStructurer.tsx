@@ -964,7 +964,15 @@ const handleDpAmountChange = (val: string) => {
 
             {/* 2. SECTION A: LAND ANALYSIS (COMPARISON) */}
             <div style={{ marginBottom: '30px', pageBreakInside: 'avoid' }}>
-                <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #9ca3af', paddingBottom: '5px', marginBottom: '10px', color: '#000000', textTransform: 'uppercase' }}>A. Land Analysis</h3>
+               <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #9ca3af', paddingBottom: '5px', marginBottom: '10px', color: '#000000', textTransform: 'uppercase' }}>A. Land Analysis</h3>
+                
+                {/* Plotted Area Display (Only if entered) */}
+                {measurements.plottedArea && (
+                   <div style={{ marginBottom: '10px', padding: '8px', backgroundColor: '#ecfdf5', border: '1px solid #10b981', borderRadius: '4px', color: '#065f46', fontWeight: 'bold', fontSize: '11px' }}>
+                      User Defined Plotted Area: {measurements.plottedArea} {measurements.plottedUnit}
+                   </div>
+                )}
+
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
                    <thead style={{ backgroundColor: '#f3f4f6', color: '#000000' }}>
                       <tr>
@@ -1029,9 +1037,16 @@ const handleDpAmountChange = (val: string) => {
                    </div>
                 </div>
 
-                {/* 4. SECTION C: COST METRICS COMPARISON */}
+               {/* 4. SECTION C: COST METRICS COMPARISON */}
                 <div style={{ marginBottom: '30px', pageBreakInside: 'avoid' }}>
                    <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #9ca3af', paddingBottom: '5px', marginBottom: '10px', color: '#000000', textTransform: 'uppercase' }}>C. Cost Metrics Comparison</h3>
+                   
+                   {measurements.plottedArea && (
+                      <p style={{ fontSize: '9px', color: '#6b7280', margin: '0 0 5px 0' }}>
+                         * Costs calculated using Plotted Area ({measurements.plottedArea} {measurements.plottedUnit}) as the denominator.
+                      </p>
+                   )}
+
                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
                       <thead style={{ backgroundColor: '#f3f4f6' }}>
                          <tr>
