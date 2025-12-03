@@ -14,6 +14,8 @@ export interface Measurements {
   inputUnit: UnitType;
   displayUnit: UnitType;
   jantriRate: number | ''; // Rate per Sq Meter
+  plottedArea?: number | ''; // New field for Plotted/Saleable Area
+  plottedUnit?: UnitType;    // Unit for Plotted Area
 }
 
 export interface Financials {
@@ -27,6 +29,12 @@ export interface Financials {
   purchaseDate: string;
 }
 
+export interface CustomExpense {
+  id: string;
+  name: string;
+  amount: number | '';
+}
+
 export interface Overheads {
   stampDutyPercent: number | '';
   architectFees: number | '';
@@ -34,6 +42,7 @@ export interface Overheads {
   naExpense: number | '';
   naPremium: number | '';
   developmentCost: number | ''; 
+  customExpenses?: CustomExpense[]; // New field for dynamic list
 }
 
 export interface PaymentScheduleItem {
