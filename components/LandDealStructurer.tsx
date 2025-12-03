@@ -218,7 +218,7 @@ export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData, initi
     if (plottedVal > 0) {
        // Convert whatever unit user selected (Vaar/SqMt) into Vigha for base calc
        if (measurements.plottedUnit === 'Vigha') plottedInVigha = plottedVal;
-       else plottedInVigha = plottedVal / CONVERSION_RATES[measurements.plottedUnit || 'SqMeter'];
+       else plottedInVigha = plottedVal / CONVERSION_RATES[measurements.plottedUnit || 'Vaar'];
     }
     
     // Denominators for 100% Basis
