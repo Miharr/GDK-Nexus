@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -12,11 +11,12 @@ import { Loader } from './components/Loader';
 import { LandDealStructurer } from './components/LandDealStructurer';
 import { ProjectHistory } from './components/ProjectHistory';
 import { PlottingDashboard } from './components/PlottingDashboard';
-import { ProjectSavedState, PlottingState } from './types';
+import { ProjectPlotsView } from './components/ProjectPlotsView'; // 1. Import New Component
+import { ProjectSavedState, PlottingState, ProjectRow } from './types';
 import { supabase } from './supabaseClient';
 
-// plotting-list: The list view to select a project before plotting
-type ViewState = 'dashboard' | 'loading' | 'land-structurer' | 'plotting-list' | 'plotting' | 'history';
+// 2. Add 'plot-registry' to ViewState
+type ViewState = 'dashboard' | 'loading' | 'land-structurer' | 'plotting-list' | 'plotting' | 'history' | 'plot-registry';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>('dashboard');
@@ -93,7 +93,25 @@ const App: React.FC = () => {
 
     setTimeout(() => {
       setCurrentView('plotting');
-    }, 800);
+    }, 300);
+  };
+
+  // 3. NEW HANDLER: Opens the Read-Only Plot Registry
+  const handleOpenPlotRegistry = (project: ProjectRow) => {
+    if (!project.full_data) {
+        alert("Project data missing.");
+        return;
+    }
+    
+    setLoadedProjectData(project.full_data);
+    setLoadedProjectId(project.id);
+    // LOAD THE PLOTS HERE:
+    setLoadedPlottingData(project.plotting_data); 
+    
+    setCurrentView('loading');
+    setTimeout(() => {
+        setCurrentView('plot-registry');
+    }, 600);
   };
 
   return (
@@ -252,9 +270,29 @@ const App: React.FC = () => {
          >
            <ProjectHistory 
              onBack={handleBackToDash} 
-             onLoadProject={(data, id) => handleLoadProject(data, id)} 
+             onLoadProject={(data, id) => handleLoadProject(data, id)}
+             // 4. Pass the new handler here
+             onOpenPlotting={(project) => handleOpenPlotRegistry(project)} 
            />
          </motion.div>
+        )}
+
+        {/* --- VIEW: PLOT REGISTRY (READ ONLY) --- */}
+        {currentView === 'plot-registry' && loadedProjectData && (
+            <motion.div
+            key="module-registry"
+            className="absolute inset-0 z-10 bg-[#F1F5F9] overflow-y-auto"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            >
+                <ProjectPlotsView 
+                    onBack={() => setCurrentView('history')}
+                    projectData={loadedProjectData}
+                    plottingData={loadedPlottingData}
+                    projectId={loadedProjectId!} // <--- ADD THIS (The ! asserts it's not undefined)
+                />
+            </motion.div>
         )}
 
       </AnimatePresence>

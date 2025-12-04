@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import { 
   ArrowLeft, 
@@ -10,7 +9,8 @@ import {
   PieChart,
   IndianRupee,
   AlertCircle,
-  CheckCircle2
+  CheckCircle2,
+  LayoutGrid // 1. Added LayoutGrid Icon
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { ProjectRow, ProjectSavedState } from '../types';
@@ -19,10 +19,11 @@ import { formatCurrency, formatDate } from '../utils/formatters';
 interface Props {
   onBack: () => void;
   onLoadProject: (data: ProjectSavedState, id: number) => void;
+  onOpenPlotting?: (project: ProjectRow) => void; // 2. Added Prop for Plotting Handler
   mode?: 'manage' | 'select'; // 'manage' = History (Open/Delete), 'select' = Plotting (Load only)
 }
 
-export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject, mode = 'manage' }) => {
+export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject, onOpenPlotting, mode = 'manage' }) => {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -58,8 +59,7 @@ export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject, mode = 
   };
 
   const handleDelete = async (id: number) => {
-    //if (!window.confirm("Are you sure you want to delete this project permanently?")) return;
-
+    // Optional: Add window.confirm here if you want safety
     const previousProjects = [...projects];
     setProjects(prev => prev.filter(p => p.id !== id));
 
@@ -185,24 +185,44 @@ export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject, mode = 
                   </div>
                 </div>
 
-                {/* Actions */}
-                <div className="flex items-center gap-3 w-full md:w-auto pt-4 md:pt-0 border-t md:border-0 border-slate-100">
+                {/* 3. Actions: Icon Only Buttons */}
+                <div className="flex items-center gap-2 w-full md:w-auto pt-4 md:pt-0 border-t md:border-0 border-slate-100 justify-end">
+                  
+                  {/* Button 1: Open Project (Base Data) */}
                   <button 
                     onClick={() => handleLoad(project)}
                     type="button"
-                    className={`${isSelectMode ? 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-emerald-200 shadow-lg' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'} flex-1 md:flex-none px-6 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all`}
+                    title={isSelectMode ? "Select Project" : "Open Cost Sheet"}
+                    className={`${isSelectMode ? 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-lg px-6' : 'bg-blue-50 text-blue-600 hover:bg-blue-100 w-10'} h-10 rounded-lg flex items-center justify-center transition-all`}
                   >
-                    {isSelectMode ? <CheckCircle2 size={18} /> : <FolderOpen size={16} />}
-                    {isSelectMode ? 'Load & Proceed' : 'Open'}
+                    {isSelectMode ? (
+                        <span className="flex gap-2 items-center font-bold text-sm"><CheckCircle2 size={18} /> Select</span> 
+                    ) : (
+                        <FolderOpen size={18} />
+                    )}
                   </button>
+
+                  {/* Button 2: Open Plotting (Only in Manage Mode) */}
+                  {!isSelectMode && (
+                    <button 
+                        onClick={() => onOpenPlotting && onOpenPlotting(project)}
+                        type="button"
+                        title="Open Plotting Dashboard"
+                        className="bg-orange-50 text-orange-600 hover:bg-orange-100 w-10 h-10 rounded-lg flex items-center justify-center transition-all"
+                    >
+                        <LayoutGrid size={18} />
+                    </button>
+                  )}
                   
+                  {/* Button 3: Delete Project (Only in Manage Mode) */}
                   {!isSelectMode && (
                     <button 
                         onClick={() => handleDelete(project.id)}
                         type="button"
-                        className="text-red-400 hover:text-red-600 hover:bg-red-50 flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+                        title="Delete Project"
+                        className="bg-red-50 text-red-500 hover:bg-red-100 hover:text-red-600 w-10 h-10 rounded-lg flex items-center justify-center transition-colors"
                     >
-                        <Trash2 size={16} /> Delete
+                        <Trash2 size={18} />
                     </button>
                   )}
                 </div>

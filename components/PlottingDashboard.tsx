@@ -9,7 +9,8 @@ import {
   CheckCircle,
   AlertCircle,
   Users,
-  Calendar // 1. Added Calendar Icon
+  Calendar,
+  Search // 1. Added Search Icon
 } from 'lucide-react';
 import { Card } from './Card';
 import { supabase } from '../supabaseClient';
@@ -17,8 +18,7 @@ import {
   ProjectSavedState, 
   PlottingState, 
   PlottingDevExpense, 
-  UnitType,
-  PlotSaleItem // Assumed this type exists based on usage, added to props if needed
+  UnitType
 } from '../types';
 import { formatCurrency, formatInputNumber, parseInputNumber } from '../utils/formatters';
 
@@ -50,27 +50,24 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
     { id: '3', description: 'Entry Gate', amount: '' },
   ]);
 
-  // New State: Plot Sales
-  // Note: Ensure PlotSaleItem is defined in your types.ts
-  const [plotSales, setPlotSales] = useState<any[]>([]); // using any[] here just to be safe if interface isn't imported, but prefer PlotSaleItem[]
+  const [plotSales, setPlotSales] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState(''); // 2. Search State
 
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [areaInVaar, setAreaInVaar] = useState<number>(0);
 
   // --- INITIALIZATION ---
   useEffect(() => {
-    // 1. Calculate Base Area in Vaar from Acquisition Module
+    // 1. Calculate Base Area in Vaar
     if (projectData) {
         const m = projectData.measurements;
         let baseVal = 0;
         let baseUnit: UnitType = 'Vaar';
 
-        // Priority 1: User defined Plotted Area in Module 1
         if (m.plottedArea && Number(m.plottedArea) > 0) {
             baseVal = Number(m.plottedArea);
             baseUnit = m.plottedUnit || 'Vaar';
         } else {
-            // Priority 2: Calculate 60% of Total Area as fallback
             const inputVal = Number(m.areaInput) || 0;
             let valInVigha = 0;
             if (m.inputUnit === 'Vigha') valInVigha = inputVal;
@@ -81,7 +78,6 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
             baseUnit = 'Vigha';
         }
 
-        // Convert whatever we found into VAAR for consistency
         const calculatedVaar = baseVal * (CONVERSION_RATES.Vaar / CONVERSION_RATES[baseUnit]);
         setAreaInVaar(calculatedVaar);
     }
@@ -96,20 +92,26 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
   }, [existingPlottingData, projectData]);
 
   // --- CALCULATIONS ---
-  
-  // Card 1: Project Cost (Rate Based)
   const totalLandAmount = (Number(landRate) || 0) * areaInVaar;
   const totalDevAmount = (Number(devRate) || 0) * areaInVaar;
   const grandTotalCost = totalLandAmount + totalDevAmount;
 
-  // Card 2: Dev Expenses (List Based)
   const totalDevExpenseList = devExpenses.reduce((sum, item) => sum + (item.amount === '' ? 0 : item.amount), 0);
 
-  // Card 3: Utilization Logic
   const totalAllocatedVaar = plotSales.reduce((sum, p) => sum + (p.areaVaar || 0), 0);
   const remainingVaar = areaInVaar - totalAllocatedVaar;
   const isOverLimit = remainingVaar < 0;
   const utilizationPercent = areaInVaar > 0 ? (totalAllocatedVaar / areaInVaar) * 100 : 0;
+
+  // 3. Search Filter Logic
+  const filteredPlots = plotSales.filter(plot => {
+    const q = searchQuery.toLowerCase();
+    return (
+      plot.customerName?.toLowerCase().includes(q) || 
+      plot.plotNumber?.toString().includes(q) ||
+      plot.phoneNumber?.includes(q)
+    );
+  });
 
   // --- HANDLERS ---
   const handleAddExpense = () => {
@@ -124,19 +126,23 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
     setDevExpenses(devExpenses.map(e => e.id === id ? { ...e, [field]: value } : e));
   };
 
-  // --- PLOT SALES HANDLERS ---
   const handleAddPlot = () => {
-    const nextNum = plotSales.length + 1;
+    // Basic auto-increment logic (Find max number + 1 to avoid duplicates on deletion)
+    const maxNum = plotSales.reduce((max, p) => (p.plotNumber > max ? p.plotNumber : max), 0);
+    
     setPlotSales([...plotSales, {
       id: crypto.randomUUID(),
-      plotNumber: nextNum,
+      plotNumber: maxNum + 1,
       customerName: '',
       phoneNumber: '',
-      bookingDate: new Date().toISOString().split('T')[0], // Default today
+      bookingDate: new Date().toISOString().split('T')[0],
       dimLengthFt: '',
       dimWidthFt: '',
       areaVaar: 0
     }]);
+    
+    // Clear search so the new item is visible immediately
+    setSearchQuery('');
   };
 
   const handleRemovePlot = (id: string) => {
@@ -152,14 +158,12 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
 
       const updatedPlot = { ...plot, [field]: value };
 
-      // Auto-Calculate Area in Vaar if dimensions change
-      // Formula: (Length_ft * Width_ft) / 9
       if (field === 'dimLengthFt' || field === 'dimWidthFt') {
          const l = field === 'dimLengthFt' ? (Number(value) || 0) : (Number(plot.dimLengthFt) || 0);
          const w = field === 'dimWidthFt' ? (Number(value) || 0) : (Number(plot.dimWidthFt) || 0);
          
          const areaSqFt = l * w;
-         const calculatedVaar = areaSqFt / 9; // 9 SqFt = 1 SqYard/Vaar
+         const calculatedVaar = areaSqFt / 9;
          updatedPlot.areaVaar = parseFloat(calculatedVaar.toFixed(2));
       }
 
@@ -170,14 +174,12 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
   const handleSave = async () => {
     if (!projectId) return;
 
-   // 1. Prepare Plotting Data (Saving rates + list + sales)
     const plottingData: PlottingState = {
       landRate,
       devRate,
       developmentExpenses: devExpenses,
-      plotSales: plotSales, // Save the new list
+      plotSales: plotSales,
       
-      // Defaults for removed features to satisfy Types
       deductionPercent: existingPlottingData?.deductionPercent || 0,
       totalPlots: existingPlottingData?.totalPlots || 0,
       plotGroups: existingPlottingData?.plotGroups || [],
@@ -186,7 +188,6 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
       salesRateUnit: existingPlottingData?.salesRateUnit || 'Vaar'
     };
 
-    // 2. Sync Logic: Update Module 1 "Development Cost" with the List Total
     const updatedFullData: ProjectSavedState = {
         ...projectData,
         overheads: {
@@ -200,7 +201,7 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
         .from('projects')
         .update({ 
             plotting_data: plottingData,
-            full_data: updatedFullData // This ensures Module 1 stays in sync
+            full_data: updatedFullData
         }) 
         .eq('id', projectId);
 
@@ -214,7 +215,6 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
     }
   };
 
-  // --- RENDER HELPERS ---
   const labelClass = "block text-xs font-semibold text-slate-500 uppercase mb-1 ml-1";
   const inputClass = "w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-2 focus:ring-safety-500 focus:border-safety-500 block p-2.5 outline-none transition-all";
 
@@ -246,11 +246,10 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
 
       <main className="max-w-7xl mx-auto px-4 md:px-8 mt-8 grid grid-cols-1 md:grid-cols-2 gap-6 pb-20">
         
-        {/* 1. Project Cost (Rate Based) */}
+        {/* 1. Project Cost */}
         <div className="md:col-span-1">
           <Card title="Project Cost" icon={<IndianRupee size={20} />} className="h-full">
             <div className="space-y-5">
-               {/* Plotted Area Display */}
                <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200">
                   <span className="text-xs font-bold text-slate-500 uppercase">Plotted Area</span>
                   <div className="text-right">
@@ -259,7 +258,6 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                   </div>
                </div>
 
-               {/* Land Rate Row */}
                <div className="grid grid-cols-12 gap-2 items-end">
                   <div className="col-span-5">
                      <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Land Rate</label>
@@ -280,7 +278,6 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                   </div>
                </div>
 
-               {/* Development Rate Row */}
                <div className="grid grid-cols-12 gap-2 items-end">
                   <div className="col-span-5">
                      <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Dev Rate</label>
@@ -301,7 +298,6 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                   </div>
                </div>
 
-               {/* Total Display Tile */}
                <div className="mt-2 bg-slate-800 text-white p-4 rounded-xl shadow-lg shadow-slate-200">
                   <div className="flex justify-between items-center">
                      <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Total Project Cost</span>
@@ -312,7 +308,7 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
           </Card>
         </div>
 
-       {/* 2. Development Expenses (List Based) */}
+       {/* 2. Development Expenses */}
         <div className="md:col-span-1">
            <Card title="Dev Expenses List" icon={<HardHat size={20} />} className="h-full">
               <div className="flex flex-col h-full">
@@ -378,7 +374,6 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                        </div>
                     </div>
                     
-                    {/* Progress Bar */}
                     <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
                        <div 
                           className={`h-full transition-all duration-500 ${isOverLimit ? 'bg-red-500' : 'bg-emerald-500'}`}
@@ -394,13 +389,26 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                     )}
                  </div>
 
+                 {/* 4. NEW SEARCH BAR */}
+                 <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <Search size={16} className="text-slate-400 group-focus-within:text-safety-500 transition-colors" />
+                    </div>
+                    <input 
+                        type="text" 
+                        placeholder="Search by Customer Name, Phone or Plot #..." 
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-safety-500 focus:border-safety-500 outline-none transition-all"
+                    />
+                 </div>
+
                  <div className="overflow-x-auto rounded-lg border border-slate-200">
                     <table className="w-full text-sm text-left border-collapse min-w-[900px]">
                        <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-200">
                           <tr>
                              <th className="px-3 py-3 w-12 text-center">#</th>
                              <th className="px-3 py-3">Customer Info</th>
-                             {/* 2. Narrower Date Column */}
                              <th className="px-3 py-3 w-24 text-center">Date</th>
                              <th className="px-3 py-3 w-48 text-center">Dimensions (ft)</th>
                              <th className="px-3 py-3 w-28 text-right">Area (Vaar)</th>
@@ -409,105 +417,131 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                           </tr>
                        </thead>
                        <tbody className="divide-y divide-slate-100 bg-white">
-                          {plotSales.map((plot, idx) => (
-                             <tr key={plot.id} className="hover:bg-slate-50 transition-colors group">
-                                <td className="px-3 py-2 text-center font-bold text-slate-400">{idx + 1}</td>
-                                <td className="px-3 py-2">
-                                   <input 
-                                      type="text" 
-                                      placeholder="Customer Name" 
-                                      value={plot.customerName}
-                                      onChange={(e) => handlePlotChange(plot.id, 'customerName', e.target.value)}
-                                      className={`${inputClass} mb-1`}
-                                   />
-                                   <input 
-                                      type="text" 
-                                      inputMode="tel"
-                                      placeholder="Phone Number" 
-                                      value={plot.phoneNumber}
-                                      onChange={(e) => handlePlotChange(plot.id, 'phoneNumber', e.target.value)}
-                                      className={`${inputClass} text-xs text-slate-500`}
-                                   />
-                                </td>
-                                
-                                {/* 3. New Compact Date Picker Implementation */}
-                                <td className="px-3 py-2">
-                                   <div className="relative w-full h-9">
-                                      <input 
-                                        type="date" 
-                                        value={plot.bookingDate}
-                                        onChange={(e) => handlePlotChange(plot.id, 'bookingDate', e.target.value)}
-                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                                      />
-                                      <div className={`w-full h-full border rounded-lg flex items-center justify-center gap-2 transition-all ${
-                                          plot.bookingDate 
-                                          ? 'bg-white border-slate-300 text-slate-700 shadow-sm' 
-                                          : 'bg-slate-50 border-dashed border-slate-300 text-slate-400'
-                                      }`}>
-                                         <Calendar size={14} />
-                                         <span className="text-xs font-bold pt-0.5">
-                                           {plot.bookingDate 
-                                             ? new Date(plot.bookingDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }) 
-                                             : ''}
-                                         </span>
-                                      </div>
-                                   </div>
-                                </td>
-
-                                <td className="px-3 py-2">
-                                   <div className="flex items-center gap-2 justify-center">
-                                      <input 
-                                         type="number" 
-                                         inputMode="decimal"
-                                         placeholder="L" 
-                                         value={plot.dimLengthFt}
-                                         onChange={(e) => handlePlotChange(plot.id, 'dimLengthFt', e.target.value)}
-                                         className={`${inputClass} w-16 text-center`}
-                                      />
-                                      <span className="text-slate-300">x</span>
-                                      <input 
-                                         type="number" 
-                                         inputMode="decimal"
-                                         placeholder="W" 
-                                         value={plot.dimWidthFt}
-                                         onChange={(e) => handlePlotChange(plot.id, 'dimWidthFt', e.target.value)}
-                                         className={`${inputClass} w-16 text-center`}
-                                      />
-                                   </div>
-                                </td>
-                               <td className="px-3 py-2 text-right">
-                                   <div className="font-bold text-slate-800 text-lg">{plot.areaVaar}</div>
-                                   <div className="text-[9px] text-slate-400 uppercase font-bold">Vaar</div>
-                                </td>
-                                <td className="px-3 py-2 text-right">
-                                   <div className="flex flex-col gap-1 text-xs">
-                                      <div className="flex justify-between gap-2">
-                                         <span className="text-slate-400">Land:</span>
-                                         <span className="font-medium text-slate-700">
-                                            {formatCurrency(plot.areaVaar * (Number(landRate) || 0))}
-                                         </span>
-                                      </div>
-                                      <div className="flex justify-between gap-2">
-                                         <span className="text-slate-400">Dev:</span>
-                                         <span className="font-medium text-blue-600">
-                                            {formatCurrency(plot.areaVaar * (Number(devRate) || 0))}
-                                         </span>
-                                      </div>
-                                      <div className="border-t border-slate-100 mt-1 pt-1 flex justify-between gap-2 font-bold text-safety-600">
-                                         <span>Total:</span>
-                                         <span>
-                                            {formatCurrency(plot.areaVaar * ((Number(landRate) || 0) + (Number(devRate) || 0)))}
-                                         </span>
-                                      </div>
-                                   </div>
-                                </td>
-                                <td className="px-3 py-2 text-center">
-                                   <button onClick={() => handleRemovePlot(plot.id)} className="text-slate-300 hover:text-red-500 transition-colors">
-                                      <Trash2 size={16} />
-                                   </button>
+                          {/* 5. Map over FILTERED plots */}
+                          {filteredPlots.length === 0 ? (
+                             <tr>
+                                <td colSpan={7} className="px-3 py-8 text-center text-slate-400 italic">
+                                   {plotSales.length === 0 ? "No plots added yet." : "No matching plots found."}
                                 </td>
                              </tr>
-                          ))}
+                          ) : (
+                              filteredPlots.map((plot, idx) => (
+                                 <tr key={plot.id} className="hover:bg-slate-50 transition-colors group">
+                                    {/* Display actual Plot Number, not Table Index */}
+                                    <td className="px-3 py-2 text-center font-bold text-slate-400">{plot.plotNumber}</td>
+                                    
+                                    <td className="px-3 py-2">
+                                       <input 
+                                          type="text" 
+                                          placeholder="Customer Name" 
+                                          value={plot.customerName}
+                                          onChange={(e) => handlePlotChange(plot.id, 'customerName', e.target.value)}
+                                          className={`${inputClass} mb-1`}
+                                       />
+                                       <input 
+                                          type="text" 
+                                          inputMode="tel"
+                                          placeholder="Phone Number" 
+                                          value={plot.phoneNumber}
+                                          onChange={(e) => handlePlotChange(plot.id, 'phoneNumber', e.target.value)}
+                                          className={`${inputClass} text-xs text-slate-500`}
+                                       />
+                                    </td>
+                                    
+                                    {/* FULL CLICKABLE Date Picker (Preserved) */}
+                                    <td className="px-3 py-2">
+                                       <div className="relative w-full h-9 group/date">
+                                          <input 
+                                            type="date" 
+                                            required
+                                            value={plot.bookingDate}
+                                            onChange={(e) => handlePlotChange(plot.id, 'bookingDate', e.target.value)}
+                                            onClick={(e) => {
+                                                try { (e.target as HTMLInputElement).showPicker(); } catch(err) {}
+                                            }}
+                                            className="
+                                                absolute inset-0 w-full h-full z-20 
+                                                opacity-0 cursor-pointer
+                                                [&::-webkit-calendar-picker-indicator]:absolute
+                                                [&::-webkit-calendar-picker-indicator]:w-full
+                                                [&::-webkit-calendar-picker-indicator]:h-full
+                                                [&::-webkit-calendar-picker-indicator]:opacity-0
+                                            "
+                                          />
+                                          <div className={`
+                                              absolute inset-0 w-full h-full z-10 
+                                              flex items-center justify-center gap-2 
+                                              border rounded-lg transition-all pointer-events-none select-none
+                                              ${plot.bookingDate 
+                                                ? 'bg-white border-slate-300 text-slate-700 shadow-sm group-hover/date:border-safety-500' 
+                                                : 'bg-slate-50 border-dashed border-slate-300 text-slate-400 group-hover/date:bg-white group-hover/date:border-safety-400'
+                                              }
+                                          `}>
+                                             <Calendar size={14} className={plot.bookingDate ? 'text-safety-600' : ''} />
+                                             <span className="text-xs font-bold uppercase tracking-tight pt-0.5">
+                                               {plot.bookingDate 
+                                                 ? new Date(plot.bookingDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) 
+                                                 : 'Date'}
+                                             </span>
+                                          </div>
+                                       </div>
+                                    </td>
+
+                                    <td className="px-3 py-2">
+                                       <div className="flex items-center gap-2 justify-center">
+                                          <input 
+                                             type="number" 
+                                             inputMode="decimal"
+                                             placeholder="L" 
+                                             value={plot.dimLengthFt}
+                                             onChange={(e) => handlePlotChange(plot.id, 'dimLengthFt', e.target.value)}
+                                             className={`${inputClass} w-16 text-center`}
+                                          />
+                                          <span className="text-slate-300">x</span>
+                                          <input 
+                                             type="number" 
+                                             inputMode="decimal"
+                                             placeholder="W" 
+                                             value={plot.dimWidthFt}
+                                             onChange={(e) => handlePlotChange(plot.id, 'dimWidthFt', e.target.value)}
+                                             className={`${inputClass} w-16 text-center`}
+                                          />
+                                       </div>
+                                    </td>
+                                   <td className="px-3 py-2 text-right">
+                                       <div className="font-bold text-slate-800 text-lg">{plot.areaVaar}</div>
+                                       <div className="text-[9px] text-slate-400 uppercase font-bold">Vaar</div>
+                                    </td>
+                                    <td className="px-3 py-2 text-right">
+                                       <div className="flex flex-col gap-1 text-xs">
+                                          <div className="flex justify-between gap-2">
+                                             <span className="text-slate-400">Land:</span>
+                                             <span className="font-medium text-slate-700">
+                                                {formatCurrency(plot.areaVaar * (Number(landRate) || 0))}
+                                             </span>
+                                          </div>
+                                          <div className="flex justify-between gap-2">
+                                             <span className="text-slate-400">Dev:</span>
+                                             <span className="font-medium text-blue-600">
+                                                {formatCurrency(plot.areaVaar * (Number(devRate) || 0))}
+                                             </span>
+                                          </div>
+                                          <div className="border-t border-slate-100 mt-1 pt-1 flex justify-between gap-2 font-bold text-safety-600">
+                                             <span>Total:</span>
+                                             <span>
+                                                {formatCurrency(plot.areaVaar * ((Number(landRate) || 0) + (Number(devRate) || 0)))}
+                                             </span>
+                                          </div>
+                                       </div>
+                                    </td>
+                                    <td className="px-3 py-2 text-center">
+                                       <button onClick={() => handleRemovePlot(plot.id)} className="text-slate-300 hover:text-red-500 transition-colors">
+                                          <Trash2 size={16} />
+                                       </button>
+                                    </td>
+                                 </tr>
+                              ))
+                          )}
                        </tbody>
                     </table>
                  </div>
