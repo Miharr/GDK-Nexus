@@ -19,6 +19,7 @@ import {
   UnitType
 } from '../types';
 import { formatCurrency, formatInputNumber, parseInputNumber } from '../utils/formatters';
+import { PlotPaymentTracker } from './PlotPaymentTracker';
 
 interface Props {
   onBack: () => void;
@@ -53,6 +54,10 @@ const [devExpenses, setDevExpenses] = useState<PlottingDevExpense[]>([
 
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [areaInVaar, setAreaInVaar] = useState<number>(0);
+  
+  // Modal State
+  const [selectedPlotId, setSelectedPlotId] = useState<string | null>(null);
+  const selectedPlot = plotSales.find(p => p.id === selectedPlotId);
 
   // --- INITIALIZATION ---
   useEffect(() => {
@@ -162,6 +167,11 @@ const [devExpenses, setDevExpenses] = useState<PlottingDevExpense[]>([
 
       return updatedPlot;
     }));
+  };
+
+  // Callback to save the full object coming back from the Payment Tracker Modal
+  const handleUpdateFullPlot = (updatedPlot: PlotSaleItem) => {
+     setPlotSales(prev => prev.map(p => p.id === updatedPlot.id ? updatedPlot : p));
   };
 
   const handleSave = async () => {
@@ -480,8 +490,15 @@ const [devExpenses, setDevExpenses] = useState<PlottingDevExpense[]>([
                                       </div>
                                    </div>
                                 </td>
-                                <td className="px-3 py-2 text-center">
-                                   <button onClick={() => handleRemovePlot(plot.id)} className="text-slate-300 hover:text-red-500 transition-colors">
+                               <td className="px-3 py-2 text-center flex items-center justify-center gap-2">
+                                   <button 
+                                     onClick={() => setSelectedPlotId(plot.id)} 
+                                     className="bg-slate-100 text-slate-600 p-2 rounded-lg hover:bg-slate-200 hover:text-safety-600 transition-colors"
+                                     title="Manage Payments"
+                                   >
+                                      <IndianRupee size={16} />
+                                   </button>
+                                   <button onClick={() => handleRemovePlot(plot.id)} className="text-slate-300 p-2 hover:text-red-500 transition-colors">
                                       <Trash2 size={16} />
                                    </button>
                                 </td>
@@ -501,6 +518,15 @@ const [devExpenses, setDevExpenses] = useState<PlottingDevExpense[]>([
       </main>
 
       {/* Success Overlay */}
+      {/* Tracker Modal */}
+      {selectedPlot && (
+         <PlotPaymentTracker 
+            plot={selectedPlot}
+            onClose={() => setSelectedPlotId(null)}
+            onSave={handleUpdateFullPlot}
+         />
+      )}
+
       {showSaveSuccess && (
         <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
           <div className="bg-emerald-500 text-white px-6 py-4 rounded-2xl shadow-2xl flex flex-col items-center gap-2 animate-in zoom-in duration-300">
