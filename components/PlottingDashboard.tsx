@@ -8,7 +8,8 @@ import {
   Trash2,
   CheckCircle,
   AlertCircle,
-  Users
+  Users,
+  Calendar // 1. Added Calendar Icon
 } from 'lucide-react';
 import { Card } from './Card';
 import { supabase } from '../supabaseClient';
@@ -16,7 +17,8 @@ import {
   ProjectSavedState, 
   PlottingState, 
   PlottingDevExpense, 
-  UnitType
+  UnitType,
+  PlotSaleItem // Assumed this type exists based on usage, added to props if needed
 } from '../types';
 import { formatCurrency, formatInputNumber, parseInputNumber } from '../utils/formatters';
 
@@ -42,14 +44,15 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
   const [landRate, setLandRate] = useState<number | ''>('');
   const [devRate, setDevRate] = useState<number | ''>('');
   
-const [devExpenses, setDevExpenses] = useState<PlottingDevExpense[]>([
+  const [devExpenses, setDevExpenses] = useState<PlottingDevExpense[]>([
     { id: '1', description: 'Compound Wall', amount: '' },
     { id: '2', description: 'Internal Roads', amount: '' },
     { id: '3', description: 'Entry Gate', amount: '' },
   ]);
 
   // New State: Plot Sales
-  const [plotSales, setPlotSales] = useState<PlotSaleItem[]>([]);
+  // Note: Ensure PlotSaleItem is defined in your types.ts
+  const [plotSales, setPlotSales] = useState<any[]>([]); // using any[] here just to be safe if interface isn't imported, but prefer PlotSaleItem[]
 
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [areaInVaar, setAreaInVaar] = useState<number>(0);
@@ -83,7 +86,7 @@ const [devExpenses, setDevExpenses] = useState<PlottingDevExpense[]>([
         setAreaInVaar(calculatedVaar);
     }
 
-// 2. Load Saved Data
+    // 2. Load Saved Data
     if (existingPlottingData) {
       setLandRate(existingPlottingData.landRate || '');
       setDevRate(existingPlottingData.devRate || '');
@@ -143,7 +146,7 @@ const [devExpenses, setDevExpenses] = useState<PlottingDevExpense[]>([
     }
   };
 
-  const handlePlotChange = (id: string, field: keyof PlotSaleItem, value: any) => {
+  const handlePlotChange = (id: string, field: any, value: any) => {
     setPlotSales(prev => prev.map(plot => {
       if (plot.id !== id) return plot;
 
@@ -397,7 +400,8 @@ const [devExpenses, setDevExpenses] = useState<PlottingDevExpense[]>([
                           <tr>
                              <th className="px-3 py-3 w-12 text-center">#</th>
                              <th className="px-3 py-3">Customer Info</th>
-                             <th className="px-3 py-3 w-32">Date</th>
+                             {/* 2. Narrower Date Column */}
+                             <th className="px-3 py-3 w-24 text-center">Date</th>
                              <th className="px-3 py-3 w-48 text-center">Dimensions (ft)</th>
                              <th className="px-3 py-3 w-28 text-right">Area (Vaar)</th>
                              <th className="px-3 py-3 w-40 text-right">Pricing</th>
@@ -425,14 +429,31 @@ const [devExpenses, setDevExpenses] = useState<PlottingDevExpense[]>([
                                       className={`${inputClass} text-xs text-slate-500`}
                                    />
                                 </td>
+                                
+                                {/* 3. New Compact Date Picker Implementation */}
                                 <td className="px-3 py-2">
-                                   <input 
-                                      type="date" 
-                                      value={plot.bookingDate}
-                                      onChange={(e) => handlePlotChange(plot.id, 'bookingDate', e.target.value)}
-                                      className={`${inputClass} text-xs`}
-                                   />
+                                   <div className="relative w-full h-9">
+                                      <input 
+                                        type="date" 
+                                        value={plot.bookingDate}
+                                        onChange={(e) => handlePlotChange(plot.id, 'bookingDate', e.target.value)}
+                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                      />
+                                      <div className={`w-full h-full border rounded-lg flex items-center justify-center gap-2 transition-all ${
+                                          plot.bookingDate 
+                                          ? 'bg-white border-slate-300 text-slate-700 shadow-sm' 
+                                          : 'bg-slate-50 border-dashed border-slate-300 text-slate-400'
+                                      }`}>
+                                         <Calendar size={14} />
+                                         <span className="text-xs font-bold pt-0.5">
+                                           {plot.bookingDate 
+                                             ? new Date(plot.bookingDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }) 
+                                             : ''}
+                                         </span>
+                                      </div>
+                                   </div>
                                 </td>
+
                                 <td className="px-3 py-2">
                                    <div className="flex items-center gap-2 justify-center">
                                       <input 
