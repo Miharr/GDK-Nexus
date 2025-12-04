@@ -113,14 +113,6 @@ export interface PlotGroup {
 
 export type PlotStatus = 'available' | 'booked' | 'sold';
 
-export interface PlotPaymentEntry {
-  id: string;
-  date: string;
-  amount: number | '';
-  description: string; // e.g. "Token", "Installment 1"
-  isPaid: boolean;
-}
-
 export interface PlotSaleItem {
   id: string;
   plotNumber: number;
@@ -129,12 +121,7 @@ export interface PlotSaleItem {
   bookingDate: string;
   dimLengthFt: number | '';
   dimWidthFt: number | '';
-  areaVaar: number; 
-  
-  // New Payment Tracking Data
-  salePrice: number; // Frozen price at time of booking
-  paymentSchedule: PlotPaymentEntry[];
-  totalReceived: number;
+  areaVaar: number; // Calculated: (L * W) / 9
 }
 
 export interface PlottingState {
