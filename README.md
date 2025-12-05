@@ -1,20 +1,93 @@
 <div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+  <img width="100%" alt="GDK Nexus Banner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+
+  <br />
+  
+  # GDK NEXUS 2442
+  ### Enterprise Land Acquisition & Plotting Management System
+
+  <p>
+    <a href="https://ai.studio/apps/drive/1hEnRnOnOym4pWqSJd4xKBl6j2FvvS0WV">
+      <img src="https://img.shields.io/badge/View_in_AI_Studio-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="View in AI Studio" />
+    </a>
+    <a href="#">
+      <img src="https://img.shields.io/badge/Status-Operational-emerald?style=for-the-badge" alt="Status" />
+    </a>
+    <a href="#">
+      <img src="https://img.shields.io/badge/Stack-React_|_Supabase-blue?style=for-the-badge" alt="Stack" />
+    </a>
+  </p>
 </div>
 
-# Run and deploy your AI Studio app
+---
 
-This contains everything you need to run your app locally.
+## ⚡ Overview
 
-View your app in AI Studio: https://ai.studio/apps/drive/1hEnRnOnOym4pWqSJd4xKBl6j2FvvS0WV
+**GDK NEXUS 2442** is a robust real estate ERP designed to streamline the complex lifecycle of land development. From initial **Land Acquisition** deal structuring (Jantri vs. Market Rate) to **Plotting Layout** costs and final **Customer Sales** management.
 
-## Run Locally
+It features a unified interface for calculating deal viability, tracking development expenses, and managing individual plot sales with dynamic payment timelines.
 
-**Prerequisites:**  Node.js
+## 🚀 Key Modules
 
+### 🚜 Module 1: Land Deal Structurer
+* **Deal Viability:** Calculate Landed Cost based on 100% (Total) or 60% (FP) basis.
+* **Jantri Integration:** Automated Govt. Jantri value calculations.
+* **Expense Tracking:** Manage stamp duty, NA premiums, architect fees, and development costs.
+* **PDF Reports:** Generate professional acquisition cost sheets.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+### 📐 Module 2: Plotting Dashboard
+* **Inventory Management:** Track sold vs. available inventory in Vaar/SqMt.
+* **Costing Engine:** Dynamic Land Rate + Development Rate calculations.
+* **Expense Logging:** Track internal road, compound wall, and gate expenses against the project budget.
+
+### 🤝 Module 3: Deal Manager & Registry
+* **Read-Only Registry:** A secure view of all plot sales and customer details.
+* **Dynamic Payment Schedules:** Create custom timelines (DP + Installments) with auto-adjusting balances.
+* **Financial Tracking:** Mark installments as "Paid" and handle shortages/surpluses automatically.
+* **Agreement Generation:** One-click PDF export for "Plot Sale Agreements".
+
+---
+
+## 🛠️ Tech Stack
+
+* **Frontend:** React (Vite), TypeScript
+* **Styling:** Tailwind CSS (Neumorphic Design System)
+* **Animations:** Framer Motion
+* **Backend / DB:** Supabase
+* **Utilities:** `html2pdf.js` (PDF Generation), `lucide-react` (Icons)
+
+---
+
+## 💻 Run Locally
+
+Follow these steps to get the Enterprise Command System running on your local machine.
+
+### Prerequisites
+* **Node.js** (v16+ recommended)
+* **npm** or **yarn**
+
+### Installation
+
+1.  **Clone the repository & Install dependencies:**
+    ```bash
+    npm install
+    ```
+
+2.  **Configure Environment:**
+    Create a `.env.local` file in the root directory and add your keys:
+    ```env
+    VITE_SUPABASE_URL=your_supabase_url_here
+    VITE_SUPABASE_ANON_KEY=your_supabase_anon_key_here
+    # If using Google AI features:
+    GEMINI_API_KEY=your_gemini_key_here
+    ```
+
+3.  **Launch the App:**
+    ```bash
+    npm run dev
+    ```
+
+<div align="center">
+  <br />
+  <p><sub>SECURE CONNECTION // ENCRYPTED V.4.2.0</sub></p>
+</div>
