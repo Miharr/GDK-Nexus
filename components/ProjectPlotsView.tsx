@@ -12,7 +12,7 @@ import {
   AlertCircle,
   RefreshCcw,
   Loader2,
-  FileText // <--- FIXED: Added this import
+  FileText
 } from 'lucide-react';
 import { ProjectSavedState } from '../types';
 import { formatCurrency, formatInputNumber, parseInputNumber } from '../utils/formatters';
@@ -40,13 +40,29 @@ interface PaymentInstallment {
 }
 
 interface PlotDealState {
+  startDate: string;
   dpAmount: number | '';
   dpType: 'percent' | 'value';
-  dpDurationText: string;
-  totalMonthsText: string;
+  
+  // Changed to Value + Unit pairs
+  dpDurationVal: string; 
+  dpDurationUnit: 'Days' | 'Months';
+  
+  totalDurationVal: string;
+  totalDurationUnit: 'Days' | 'Months';
+  
   numInstallments: string; 
   schedule: PaymentInstallment[];
 }
+
+// Helper to get local date string YYYY-MM-DD
+const getLocalToday = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
 
 export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottingData, projectId }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -80,12 +96,11 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
     setExpandedPlotId(expandedPlotId === id ? null : id);
   };
 
-  // 3. SAVE HANDLER (The Engine)
+  // 3. SAVE HANDLER
   const handleSaveDeal = async (plotId: string, dealData: PlotDealState) => {
-    // A. Update Local State first (Optimistic UI)
     const updatedPlots = plots.map((p: any) => {
         if (p.id === plotId) {
-            return { ...p, dealStructure: dealData }; // Save deal data into the plot object
+            return { ...p, dealStructure: dealData };
         }
         return p;
     });
@@ -93,7 +108,6 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
     const newPlottingData = { ...data, plotSales: updatedPlots };
     setLocalPlottingData(newPlottingData);
 
-    // B. Update Database
     try {
         const { error } = await supabase
             .from('projects')
@@ -171,7 +185,6 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
                         const totalValue = area * (landRate + devRate);
                         const isExpanded = expandedPlotId === plot.id;
                         
-                        // Check deal status
                         const deal = plot.dealStructure;
                         const hasActiveDeal = deal && deal.schedule && deal.schedule.length > 0;
                         const isDealClosed = hasActiveDeal && deal.schedule.every((item: any) => item.isPaid);
@@ -198,13 +211,13 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
                                         <div className="text-xs text-slate-500">{plot.phoneNumber || '-'}</div>
                                     </div>
 
-                                    {/* Size: Visible on Mobile (Left) */}
+                                    {/* Size */}
                                     <div className="col-span-1 md:col-span-2 text-left md:text-center font-mono text-xs text-slate-600">
                                         <span className="md:hidden text-slate-400 font-sans mr-1">Size:</span>
                                         {formatInputNumber(area)} Vaar
                                     </div>
 
-                                    {/* Value: Visible on Mobile (Right) */}
+                                    {/* Value */}
                                     <div className="col-span-1 md:col-span-2 text-right font-bold text-emerald-600 text-sm">
                                         {formatCurrency(totalValue)}
                                     </div>
@@ -260,14 +273,33 @@ interface ManagerProps {
     onSave: (id: string, data: PlotDealState) => Promise<boolean>;
 }
 
+// Helper to format dates cleanly
+const displayDate = (dateStr: string) => {
+    if(!dateStr) return '-';
+    const safeDate = dateStr.includes('T') ? dateStr : `${dateStr}T12:00:00`;
+    return new Date(safeDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+// Helper for Indian Currency Formatting (Input Display)
+const formatIndianInput = (val: number | string) => {
+    if (val === '' || val === undefined) return '';
+    return val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","); // Basic, can use Intl for perfect Indian
+};
+
 const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData, projectIdentity, initialDeal, onSave }) => {
     
-    // Load initial deal if exists, else defaults
     const [deal, setDeal] = useState<PlotDealState>(initialDeal || {
+        startDate: getLocalToday(),
         dpAmount: '',
         dpType: 'percent',
-        dpDurationText: '',
-        totalMonthsText: '',
+        
+        // Default to Months
+        dpDurationVal: '',
+        dpDurationUnit: 'Months',
+        
+        totalDurationVal: '',
+        totalDurationUnit: 'Months',
+        
         numInstallments: '',
         schedule: []
     });
@@ -275,8 +307,9 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
     const [isSaving, setIsSaving] = useState(false);
     const [lastSaved, setLastSaved] = useState<Date | null>(initialDeal ? new Date() : null);
 
-    // Helper for input styles
+    // Styles
     const inputBase = "w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 block p-2.5 outline-none transition-all";
+    const labelClass = "block text-xs font-bold text-slate-500 uppercase mb-1";
 
     const handleBuildTimeline = () => {
         const dpVal = deal.dpType === 'percent' 
@@ -288,36 +321,67 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
 
         if (nInst <= 0) return;
 
-        const instAmount = Math.round(balance / nInst); 
+        // --- DATE CALCULATION LOGIC ---
+        // 1. Safe Start Date
+        const safeStartStr = deal.startDate.includes('T') ? deal.startDate : `${deal.startDate}T12:00:00`;
+        const start = new Date(safeStartStr);
+        
+        // 2. Calculate DP Due Date (Deal Date + DP Window)
+        const dpNum = parseFloat(deal.dpDurationVal) || 0;
+        const isDpDays = deal.dpDurationUnit === 'Days';
+        
+        const dpDate = new Date(start); 
+        if (isDpDays) dpDate.setDate(dpDate.getDate() + dpNum);
+        else dpDate.setMonth(dpDate.getMonth() + dpNum);
+
+        // 3. Calculate End Date (Deal Date + Total Duration)
+        const totalNum = parseFloat(deal.totalDurationVal) || 0;
+        const isTotalDays = deal.totalDurationUnit === 'Days';
+
+        const endDate = new Date(start); 
+        if (isTotalDays) endDate.setDate(endDate.getDate() + totalNum);
+        else endDate.setMonth(endDate.getMonth() + totalNum);
+
+        // 4. Calculate Interval
+        const timeSpan = endDate.getTime() - dpDate.getTime();
+        const validTimeSpan = Math.max(0, timeSpan);
+        const intervalMs = nInst > 0 ? validTimeSpan / Math.ceil(nInst) : 0;
+
+        const instAmount = nInst > 0 ? Math.round(balance / nInst) : 0; 
         const newSchedule: PaymentInstallment[] = [];
 
-        // Add DP Row
+        // Row 1: Down Payment
         newSchedule.push({
             id: 1,
             label: 'Down Payment',
-            dueDate: deal.dpDurationText || 'Immediate',
+            dueDate: dpDate.toISOString().split('T')[0],
             expectedAmount: dpVal,
             paidAmount: '',
             isPaid: false
         });
 
-        // Add Installment Rows
-        const count = Math.ceil(nInst);
-        let runningBalance = balance;
+        // Row 2+: Installments
+        if (nInst > 0) {
+            const count = Math.ceil(nInst);
+            let runningBalance = balance;
 
-        for(let i = 0; i < count; i++) {
-            let amount = instAmount;
-            if (i === count - 1) amount = runningBalance;
-            else runningBalance -= amount;
+            for(let i = 0; i < count; i++) {
+                let amount = instAmount;
+                if (i === count - 1) amount = runningBalance;
+                else runningBalance -= amount;
+                
+                const instDateMs = dpDate.getTime() + ((i + 1) * intervalMs);
+                const instDate = new Date(instDateMs);
 
-            newSchedule.push({
-                id: i + 2,
-                label: `Installment ${i + 1}`,
-                dueDate: i === 0 ? 'After DP' : 'Next Cycle',
-                expectedAmount: amount,
-                paidAmount: '',
-                isPaid: false
-            });
+                newSchedule.push({
+                    id: i + 2,
+                    label: `Installment ${i + 1}`,
+                    dueDate: instDate.toISOString().split('T')[0],
+                    expectedAmount: amount,
+                    paidAmount: '',
+                    isPaid: false
+                });
+            }
         }
         setDeal({ ...deal, schedule: newSchedule });
     };
@@ -326,6 +390,12 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
         const numericVal = parseInputNumber(val);
         const newSchedule = [...deal.schedule];
         newSchedule[index].paidAmount = numericVal === 0 && val === '' ? '' : numericVal;
+        setDeal({ ...deal, schedule: newSchedule });
+    };
+
+    const handleDateChange = (index: number, val: string) => {
+        const newSchedule = [...deal.schedule];
+        newSchedule[index].dueDate = val;
         setDeal({ ...deal, schedule: newSchedule });
     };
 
@@ -349,7 +419,6 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
         setDeal({ ...deal, schedule: newSchedule });
     };
 
-    // Trigger Parent Save
     const triggerSave = async () => {
         setIsSaving(true);
         const success = await onSave(plotId, deal);
@@ -357,12 +426,10 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
         if(success) setLastSaved(new Date());
     };
 
-    // --- HTML2PDF GENERATOR ---
     const handleExportPDF = () => {
         const element = document.getElementById(`pdf-template-${plotId}`);
         if (!element) return;
         
-        // Show element temporarily
         element.style.display = 'block';
         
         const customerName = plotData.customerName ? plotData.customerName.replace(/\s+/g, '_') : 'Customer';
@@ -386,58 +453,126 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
         <div className="space-y-6">
             
             {/* --- TOP: INPUTS --- */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 items-end">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 items-end">
+                
+                {/* 0. START DATE */}
                 <div className="col-span-2 md:col-span-1">
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Down Payment</label>
-                    <div className="flex">
+                    <label className={labelClass}>Deal Date</label>
+                    <div className="relative w-full h-[42px] group">
                         <input 
-                            type="number" 
-                            inputMode="decimal" 
-                            placeholder={deal.dpType === 'percent' ? "e.g. 20" : "Amount"}
-                            value={deal.dpAmount}
-                            onChange={(e) => setDeal({...deal, dpAmount: parseInputNumber(e.target.value)})}
-                            className={`${inputBase} rounded-r-none border-r-0`}
+                            type="date" 
+                            value={deal.startDate}
+                            onChange={(e) => setDeal({...deal, startDate: e.target.value})}
+                            onClick={(e) => {try{(e.target as HTMLInputElement).showPicker()}catch(err){}}}
+                            className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0"
                         />
-                        <button 
-                            onClick={() => setDeal({...deal, dpType: deal.dpType === 'percent' ? 'value' : 'percent'})}
-                            className="bg-slate-100 border border-slate-300 border-l-0 rounded-r-lg px-3 text-xs font-bold text-slate-600 hover:bg-slate-200"
-                        >
-                            {deal.dpType === 'percent' ? '%' : '₹'}
-                        </button>
+                        <div className="w-full h-full bg-white border border-slate-300 rounded-lg flex items-center px-3 gap-2 transition-all">
+                            <Calendar size={16} className="text-orange-500" />
+                            <span className="text-sm font-bold text-slate-800">{displayDate(deal.startDate)}</span>
+                        </div>
                     </div>
                 </div>
 
+                {/* 1. Down Payment (BIG BUTTONS) */}
                 <div className="col-span-2 md:col-span-1">
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">DP Duration</label>
-                    <input 
-                        type="text" 
-                        placeholder="e.g. 1 Month"
-                        value={deal.dpDurationText}
-                        onChange={(e) => setDeal({...deal, dpDurationText: e.target.value})}
-                        className={inputBase}
-                    />
+                    <div className="flex justify-between items-center mb-1">
+                        <label className={labelClass}>Down Payment</label>
+                        {/* Type Switcher */}
+                        <div className="flex bg-slate-100 rounded p-0.5">
+                            <button 
+                                onClick={() => setDeal({...deal, dpType: 'percent'})}
+                                className={`px-2 py-0.5 text-[10px] font-bold rounded transition-all ${deal.dpType === 'percent' ? 'bg-white shadow text-slate-900' : 'text-slate-400'}`}
+                            >
+                                %
+                            </button>
+                            <button 
+                                onClick={() => setDeal({...deal, dpType: 'value'})}
+                                className={`px-2 py-0.5 text-[10px] font-bold rounded transition-all ${deal.dpType === 'value' ? 'bg-white shadow text-slate-900' : 'text-slate-400'}`}
+                            >
+                                ₹
+                            </button>
+                        </div>
+                    </div>
+                    
+                    {/* Input with visual INR formatting */}
+                    <div className="relative h-[42px]">
+                        <input 
+                            type="text" 
+                            inputMode="decimal" 
+                            placeholder={deal.dpType === 'percent' ? "e.g. 20" : "Amount"}
+                            // Display logic: show commas for amount, raw for percent
+                            value={deal.dpType === 'value' ? formatIndianInput(deal.dpAmount) : deal.dpAmount}
+                            onChange={(e) => {
+                                const raw = parseInputNumber(e.target.value);
+                                setDeal({...deal, dpAmount: raw === 0 && e.target.value === '' ? '' : raw});
+                            }}
+                            className={`${inputBase} h-full font-bold ${deal.dpType === 'value' ? 'pl-7' : ''}`}
+                        />
+                        {deal.dpType === 'value' && (
+                            <span className="absolute left-3 top-2.5 text-slate-400 font-bold text-sm">₹</span>
+                        )}
+                        {deal.dpType === 'percent' && (
+                            <span className="absolute right-3 top-2.5 text-slate-400 font-bold text-sm">%</span>
+                        )}
+                    </div>
                 </div>
 
+                {/* 2. DP Duration (WITH UNIT DROPDOWN) */}
                 <div className="col-span-1">
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Total Time</label>
-                    <input 
-                        type="text" 
-                        placeholder="e.g. 11 Months"
-                        value={deal.totalMonthsText}
-                        onChange={(e) => setDeal({...deal, totalMonthsText: e.target.value})}
-                        className={inputBase}
-                    />
+                    <label className={labelClass}>DP Window</label>
+                    <div className="flex h-[42px]">
+                        <input 
+                            type="number" 
+                            inputMode="decimal"
+                            placeholder="0"
+                            value={deal.dpDurationVal}
+                            onChange={(e) => setDeal({...deal, dpDurationVal: e.target.value})}
+                            className={`${inputBase} h-full rounded-r-none border-r-0 text-center px-1 min-w-0`}
+                        />
+                        <select 
+                            value={deal.dpDurationUnit}
+                            onChange={(e) => setDeal({...deal, dpDurationUnit: e.target.value as any})}
+                            className="bg-slate-100 border border-slate-300 border-l-0 rounded-r-lg px-2 text-xs font-bold text-slate-600 outline-none h-full"
+                        >
+                            <option value="Months">Mth</option>
+                            <option value="Days">Day</option>
+                        </select>
+                    </div>
                 </div>
 
+                {/* 3. Total Time (WITH UNIT DROPDOWN) */}
                 <div className="col-span-1">
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Installments</label>
+                    <label className={labelClass}>Total Time</label>
+                    <div className="flex h-[42px]">
+                        <input 
+                            type="number" 
+                            inputMode="decimal"
+                            placeholder="0"
+                            value={deal.totalDurationVal}
+                            onChange={(e) => setDeal({...deal, totalDurationVal: e.target.value})}
+                            className={`${inputBase} h-full rounded-r-none border-r-0 text-center px-1 min-w-0`}
+                        />
+                        <select 
+                            value={deal.totalDurationUnit}
+                            onChange={(e) => setDeal({...deal, totalDurationUnit: e.target.value as any})}
+                            className="bg-slate-100 border border-slate-300 border-l-0 rounded-r-lg px-2 text-xs font-bold text-slate-600 outline-none h-full"
+                        >
+                            <option value="Months">Mth</option>
+                            <option value="Days">Day</option>
+                        </select>
+                    </div>
+                </div>
+
+                {/* 4. Installments */}
+                <div className="col-span-2 md:col-span-1">
+                    <label className={labelClass}>Installments</label>
                     <input 
                         type="number" 
                         inputMode="decimal"
                         placeholder="e.g. 2.5"
                         value={deal.numInstallments}
                         onChange={(e) => setDeal({...deal, numInstallments: e.target.value})}
-                        className={inputBase}
+                        className={`${inputBase} h-[42px]`}
                     />
                 </div>
             </div>
@@ -468,17 +603,34 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                         {deal.schedule.map((item, idx) => (
                             <div key={item.id} className={`p-4 flex flex-col md:flex-row gap-4 items-center ${item.isPaid ? 'bg-emerald-50/50' : ''}`}>
                                 
-                                {/* Info */}
+                                {/* Info Label */}
+                                <div className="w-full md:w-32">
+                                    <div className="font-bold text-slate-800 text-sm">{item.label}</div>
+                                </div>
+
+                                {/* Due Date (Editable Overlay) */}
                                 <div className="flex-1 w-full md:w-auto">
-                                    <div className="flex justify-between md:block">
-                                        <div className="font-bold text-slate-800 text-sm">{item.label}</div>
-                                        <div className="text-xs text-slate-400 font-mono mt-0.5">{item.dueDate}</div>
+                                    <div className="relative w-full md:w-40 h-[36px] group">
+                                        <input 
+                                            type="date"
+                                            disabled={item.isPaid}
+                                            value={item.dueDate}
+                                            onChange={(e) => handleDateChange(idx, e.target.value)}
+                                            onClick={(e) => {try{(e.target as HTMLInputElement).showPicker()}catch(err){}}}
+                                            className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer disabled:cursor-not-allowed [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0"
+                                        />
+                                        <div className={`w-full h-full border rounded-lg flex items-center px-3 gap-2 transition-all ${item.isPaid ? 'bg-transparent border-transparent' : 'bg-white border-slate-200'}`}>
+                                            {!item.isPaid && <Calendar size={14} className="text-slate-400" />}
+                                            <span className={`text-xs font-bold ${item.isPaid ? 'text-slate-500' : 'text-slate-700'}`}>
+                                                {displayDate(item.dueDate)}
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
 
                                 {/* Expected */}
                                 <div className="w-full md:w-32 flex justify-between md:block text-right">
-                                    <span className="md:hidden text-xs font-bold text-slate-400">Due:</span>
+                                    <span className="md:hidden text-xs font-bold text-slate-400">Amount:</span>
                                     <div className="font-bold text-slate-600">{formatCurrency(item.expectedAmount)}</div>
                                 </div>
 
@@ -486,11 +638,11 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                 <div className="w-full md:w-40 relative">
                                     <span className="absolute left-3 top-2.5 text-slate-400 text-xs font-bold">₹</span>
                                     <input 
-                                        type="number"
+                                        type="text" // Type text to allow comma display
                                         inputMode="decimal"
                                         placeholder="Enter Paid"
                                         disabled={item.isPaid}
-                                        value={item.paidAmount}
+                                        value={formatIndianInput(item.paidAmount)} // VISUAL FORMATTING
                                         onChange={(e) => handlePaymentChange(idx, e.target.value)}
                                         className={`w-full pl-6 pr-3 py-2 text-sm font-bold rounded-lg border outline-none transition-all ${
                                             item.isPaid 
@@ -526,7 +678,6 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
 
                         {/* BUTTONS ROW */}
                         <div className="flex gap-3">
-                            {/* PDF Export Button */}
                             <button 
                                 onClick={handleExportPDF}
                                 className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-slate-50 transition-all flex items-center gap-2"
@@ -535,7 +686,6 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                 <span className="hidden md:inline">Print PDF</span>
                             </button>
 
-                            {/* Save Button */}
                             <button 
                                 onClick={triggerSave}
                                 disabled={isSaving}
@@ -558,7 +708,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                     <p style={{ margin: '4px 0 0', color: '#333333', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px' }}>{projectIdentity.village || 'Project Name'}</p>
                                 </div>
                                 <div style={{ textAlign: 'right' }}>
-                                    <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#000000' }}>{new Date().toLocaleDateString()}</div>
+                                    <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#000000' }}>{displayDate(new Date().toISOString())}</div>
                                     <div style={{ fontSize: '9px', color: '#333333', marginTop: '4px' }}>Plot #{plotData.plotNumber}</div>
                                 </div>
                             </div>
@@ -582,7 +732,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                         </tr>
                                         <tr>
                                             <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#374151' }}>Booking Date</td>
-                                            <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>{plotData.bookingDate}</td>
+                                            <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>{displayDate(plotData.bookingDate)}</td>
                                             <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#374151' }}>Dimensions</td>
                                             <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>{plotData.dimLengthFt} x {plotData.dimWidthFt} ft</td>
                                         </tr>
@@ -608,7 +758,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                     </div>
                                     <div style={{ flex: '1 1 40%' }}>
                                         <div style={{ fontSize: '9px', color: '#333333' }}>Total Duration</div>
-                                        <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#000000' }}>{deal.totalMonthsText}</div>
+                                        <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#000000' }}>{deal.totalDurationVal} {deal.totalDurationUnit}</div>
                                     </div>
                                 </div>
                             </div>
@@ -630,7 +780,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                         {deal.schedule.map((item, i) => (
                                             <tr key={item.id}>
                                                 <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>{item.label}</td>
-                                                <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>{item.dueDate}</td>
+                                                <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb' }}>{displayDate(item.dueDate)}</td>
                                                 <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb', textAlign: 'right' }}>{formatCurrency(item.expectedAmount)}</td>
                                                 <td style={{ padding: '8px', borderBottom: '1px solid #e5e7eb', textAlign: 'right', fontWeight: 'bold' }}>
                                                     {item.isPaid ? formatCurrency(Number(item.paidAmount)) : '-'}

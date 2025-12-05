@@ -478,11 +478,11 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                                               }
                                           `}>
                                              <Calendar size={14} className={plot.bookingDate ? 'text-safety-600' : ''} />
-                                             <span className="text-xs font-bold uppercase tracking-tight pt-0.5">
-                                               {plot.bookingDate 
-                                                 ? new Date(plot.bookingDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) 
-                                                 : 'Date'}
-                                             </span>
+                                             <span className="text-xs font-bold pt-0.5">
+                                           {plot.bookingDate 
+                                             ? new Date(`${plot.bookingDate}T12:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) 
+                                             : 'Date'}
+                                         </span>
                                           </div>
                                        </div>
                                     </td>

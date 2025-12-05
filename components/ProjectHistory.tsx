@@ -175,8 +175,9 @@ export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject, onOpenP
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <Calendar size={14} className="text-safety-500" />
-                      {formatDate(new Date(project.created_at))}
+                     <Calendar size={14} className="text-safety-500" />
+                      {/* Fix: Parse date string directly to avoid timezone shift */}
+                      {new Date(project.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                     </div>
                     <div className="flex items-center gap-1.5 font-bold text-slate-700">
                       <IndianRupee size={14} className="text-safety-500" />
