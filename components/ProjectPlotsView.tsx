@@ -273,11 +273,18 @@ interface ManagerProps {
     onSave: (id: string, data: PlotDealState) => Promise<boolean>;
 }
 
-// Helper to format dates cleanly
+// Helper to format dates cleanly (Crash Proof)
 const displayDate = (dateStr: string) => {
     if(!dateStr) return '-';
-    const safeDate = dateStr.includes('T') ? dateStr : `${dateStr}T12:00:00`;
-    return new Date(safeDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    try {
+        const safeDate = dateStr.includes('T') ? dateStr : `${dateStr}T12:00:00`;
+        const dateObj = new Date(safeDate);
+        // Check if date is valid before formatting
+        if (isNaN(dateObj.getTime())) return '-'; 
+        return dateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch (e) {
+        return '-';
+    }
 };
 
 // Helper for Indian Currency Formatting (Input Display)
@@ -826,4 +833,5 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
             )}
         </div>
     );
+
 };
