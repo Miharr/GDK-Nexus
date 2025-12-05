@@ -9,6 +9,8 @@ import {
   PieChart,
   IndianRupee,
   AlertCircle,
+  PenTool, // New Icon
+  X,        // New Icon
   CheckCircle2,
   LayoutGrid // 1. Added LayoutGrid Icon
 } from 'lucide-react';
@@ -19,16 +21,19 @@ import { formatCurrency, formatDate } from '../utils/formatters';
 interface Props {
   onBack: () => void;
   onLoadProject: (data: ProjectSavedState, id: number) => void;
-  onOpenPlotting?: (project: ProjectRow) => void; // 2. Added Prop for Plotting Handler
-  mode?: 'manage' | 'select'; // 'manage' = History (Open/Delete), 'select' = Plotting (Load only)
+  onEditPlotting?: (data: ProjectSavedState, id: number) => void; // <--- NEW PROP
+  onOpenPlotting?: (project: ProjectRow) => void; 
+  mode?: 'manage' | 'select'; 
 }
 
-export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject, onOpenPlotting, mode = 'manage' }) => {
+export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject, onEditPlotting, onOpenPlotting, mode = 'manage' }) => {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [error, setError] = useState<string | null>(null);
-
+  
+  // Security State: Stores the ID of the project pending deletion
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   useEffect(() => {
     fetchProjects();
   }, []);
@@ -58,8 +63,22 @@ export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject, onOpenP
     }
   };
 
+  // Two-step delete logic
+  const requestDelete = (id: number) => {
+    if (deleteConfirmId === id) {
+        // Second click: Actually delete
+        handleDelete(id);
+        setDeleteConfirmId(null);
+    } else {
+        // First click: Arm the button
+        setDeleteConfirmId(id);
+        // Auto-reset after 3 seconds if not confirmed
+        setTimeout(() => setDeleteConfirmId(null), 3000);
+    }
+  };
+
   const handleDelete = async (id: number) => {
-    // Optional: Add window.confirm here if you want safety
+    // No window.confirm needed, the UI handles double-tap safety
     const previousProjects = [...projects];
     setProjects(prev => prev.filter(p => p.id !== id));
 
@@ -189,42 +208,58 @@ export const ProjectHistory: React.FC<Props> = ({ onBack, onLoadProject, onOpenP
                 {/* 3. Actions: Icon Only Buttons */}
                 <div className="flex items-center gap-2 w-full md:w-auto pt-4 md:pt-0 border-t md:border-0 border-slate-100 justify-end">
                   
-                  {/* Button 1: Open Project (Base Data) */}
+                  {/* A. Open Cost Sheet (Mod 1) */}
                   <button 
                     onClick={() => handleLoad(project)}
                     type="button"
-                    title={isSelectMode ? "Select Project" : "Open Cost Sheet"}
+                    title="Open Cost Sheet"
                     className={`${isSelectMode ? 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-lg px-6' : 'bg-blue-50 text-blue-600 hover:bg-blue-100 w-10'} h-10 rounded-lg flex items-center justify-center transition-all`}
                   >
-                    {isSelectMode ? (
-                        <span className="flex gap-2 items-center font-bold text-sm"><CheckCircle2 size={18} /> Select</span> 
-                    ) : (
-                        <FolderOpen size={18} />
-                    )}
+                    {isSelectMode ? <span className="flex gap-2 items-center font-bold text-sm"><CheckCircle2 size={18} /> Select</span> : <FolderOpen size={18} />}
                   </button>
 
-                  {/* Button 2: Open Plotting (Only in Manage Mode) */}
                   {!isSelectMode && (
-                    <button 
-                        onClick={() => onOpenPlotting && onOpenPlotting(project)}
-                        type="button"
-                        title="Open Plotting Dashboard"
-                        className="bg-orange-50 text-orange-600 hover:bg-orange-100 w-10 h-10 rounded-lg flex items-center justify-center transition-all"
-                    >
-                        <LayoutGrid size={18} />
-                    </button>
-                  )}
-                  
-                  {/* Button 3: Delete Project (Only in Manage Mode) */}
-                  {!isSelectMode && (
-                    <button 
-                        onClick={() => handleDelete(project.id)}
-                        type="button"
-                        title="Delete Project"
-                        className="bg-red-50 text-red-500 hover:bg-red-100 hover:text-red-600 w-10 h-10 rounded-lg flex items-center justify-center transition-colors"
-                    >
-                        <Trash2 size={18} />
-                    </button>
+                    <>
+                        {/* B. Edit Plotting (Mod 2) */}
+                        <button 
+                            onClick={() => onEditPlotting && project.full_data && onEditPlotting(project.full_data, project.id)}
+                            type="button"
+                            title="Edit Plots"
+                            className="bg-slate-100 text-slate-600 hover:bg-slate-200 w-10 h-10 rounded-lg flex items-center justify-center transition-all"
+                        >
+                            <PenTool size={18} />
+                        </button>
+
+                        {/* C. View Registry (Mod 3 View) */}
+                        <button 
+                            onClick={() => onOpenPlotting && onOpenPlotting(project)}
+                            type="button"
+                            title="View Deal Registry"
+                            className="bg-orange-50 text-orange-600 hover:bg-orange-100 w-10 h-10 rounded-lg flex items-center justify-center transition-all"
+                        >
+                            <LayoutGrid size={18} />
+                        </button>
+                        
+                        {/* D. Secure Delete (Double Tap) */}
+                        <button 
+                            onClick={() => requestDelete(project.id)}
+                            type="button"
+                            title="Delete Project"
+                            className={`
+                                w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200
+                                ${deleteConfirmId === project.id 
+                                    ? 'bg-red-600 text-white shadow-red-200 shadow-lg w-20' // Expands on click
+                                    : 'bg-red-50 text-red-500 hover:bg-red-100'
+                                }
+                            `}
+                        >
+                            {deleteConfirmId === project.id ? (
+                                <span className="text-xs font-bold animate-in fade-in">Sure?</span>
+                            ) : (
+                                <Trash2 size={18} />
+                            )}
+                        </button>
+                    </>
                   )}
                 </div>
 

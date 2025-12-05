@@ -5,17 +5,18 @@ import {
   LayoutGrid, 
   Hexagon, 
   ArrowRight,
-  History
+  History,
+  FolderOpen
 } from 'lucide-react';
 import { Loader } from './components/Loader';
 import { LandDealStructurer } from './components/LandDealStructurer';
 import { ProjectHistory } from './components/ProjectHistory';
 import { PlottingDashboard } from './components/PlottingDashboard';
-import { ProjectPlotsView } from './components/ProjectPlotsView'; // 1. Import New Component
+import { ProjectPlotsView } from './components/ProjectPlotsView'; 
 import { ProjectSavedState, PlottingState, ProjectRow } from './types';
 import { supabase } from './supabaseClient';
 
-// 2. Add 'plot-registry' to ViewState
+// plotting-list is technically unused now but kept for type safety
 type ViewState = 'dashboard' | 'loading' | 'land-structurer' | 'plotting-list' | 'plotting' | 'history' | 'plot-registry';
 
 const App: React.FC = () => {
@@ -37,21 +38,18 @@ const App: React.FC = () => {
       setLoadedPlottingData(undefined);
     }
     
-    // 3. Logic for Module 2 (Routing)
-    // When clicking Plotting, we ALWAYS go to the selection list first
-    let targetView = view;
-    if (view === 'plotting') {
-        targetView = 'plotting-list';
-    }
-
     // 4. Navigate
     setTimeout(() => {
-      setCurrentView(targetView);
-    }, 800);
+      setCurrentView(view);
+    }, 300);
   };
 
   const handleBackToDash = () => {
     setCurrentView('dashboard');
+  };
+
+  const handleBackToHistory = () => {
+    setCurrentView('history');
   };
 
   // Handler for Module 1 loading from History
@@ -63,10 +61,10 @@ const App: React.FC = () => {
     setCurrentView('loading');
     setTimeout(() => {
       setCurrentView('land-structurer');
-    }, 1000);
+    }, 300);
   };
 
-  // Handler for Module 2 loading from Selection List
+  // Handler for Module 2 loading from History (Edit Plots)
   const handleLoadPlottingProject = async (data: ProjectSavedState, id: number) => {
     setLoadedProjectData(data);
     setLoadedProjectId(id);
@@ -111,7 +109,7 @@ const App: React.FC = () => {
     setCurrentView('loading');
     setTimeout(() => {
         setCurrentView('plot-registry');
-    }, 600);
+    }, 300);
   };
 
   return (
@@ -169,32 +167,23 @@ const App: React.FC = () => {
             </header>
 
             {/* Modules Grid - Centered 2 Cols */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10 max-w-6xl mx-auto w-full flex-1 items-center content-center">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-10 max-w-4xl mx-auto w-full flex-1 items-center content-center">
               
-              {/* Card 1: Land Acquisition */}
+              {/* Card 1: New Land Acquisition */}
               <NeuCard 
-                title="Land Acquisition"
-                subtitle="Deal Structuring & Jantri"
+                title="New Land Acquisition"
+                subtitle="Create Deal & Jantri Sheet"
                 icon={<Landmark size={32} />}
                 delay={0.1}
                 onClick={() => handleModuleSelect('land-structurer')}
               />
 
-              {/* Card 2: Plotting */}
+              {/* Card 2: Project Archives (Renamed) */}
               <NeuCard 
-                title="Plotting & Inventory"
-                subtitle="Costing & Yield Analysis"
-                icon={<LayoutGrid size={32} />}
+                title="Project Archives"
+                subtitle="Manage Costs, Plots & Deals"
+                icon={<FolderOpen size={32} />}
                 delay={0.2}
-                onClick={() => handleModuleSelect('plotting')}
-              />
-
-              {/* Card 3: History */}
-              <NeuCard 
-                title="Project History"
-                subtitle="Archives & Database"
-                icon={<History size={32} />}
-                delay={0.3}
                 onClick={() => handleModuleSelect('history')}
               />
 
@@ -217,30 +206,14 @@ const App: React.FC = () => {
             exit={{ opacity: 0 }}
           >
             <LandDealStructurer 
-              onBack={handleBackToDash} 
+              // Logic: If we have an ID (loaded project), go back to history. If new, go to dash.
+              onBack={loadedProjectId ? handleBackToHistory : handleBackToDash} 
               initialData={loadedProjectData}
               initialId={loadedProjectId}
             />
           </motion.div>
         )}
         
-       {/* --- VIEW: MODULE 2 SELECTION LIST --- */}
-       {currentView === 'plotting-list' && (
-           <motion.div
-            key="module-2-list"
-            className="absolute inset-0 z-10 bg-[#F1F5F9] overflow-y-auto"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-           >
-              <ProjectHistory 
-                mode="select"
-                onBack={handleBackToDash}
-                onLoadProject={handleLoadPlottingProject}
-              />
-           </motion.div>
-       )}
-
        {/* --- VIEW: MODULE 2 (PLOTTING DASHBOARD) --- */}
        {currentView === 'plotting' && loadedProjectData && loadedProjectId && (
           <motion.div
@@ -251,7 +224,7 @@ const App: React.FC = () => {
             exit={{ opacity: 0 }}
           >
              <PlottingDashboard 
-               onBack={() => setCurrentView('plotting-list')} // Back goes to list, not dash
+               onBack={handleBackToHistory} // FIXED: Always goes back to History
                projectData={loadedProjectData}
                existingPlottingData={loadedPlottingData}
                projectId={loadedProjectId}
@@ -271,7 +244,7 @@ const App: React.FC = () => {
            <ProjectHistory 
              onBack={handleBackToDash} 
              onLoadProject={(data, id) => handleLoadProject(data, id)}
-             // 4. Pass the new handler here
+             onEditPlotting={(data, id) => handleLoadPlottingProject(data, id)} 
              onOpenPlotting={(project) => handleOpenPlotRegistry(project)} 
            />
          </motion.div>
@@ -287,10 +260,10 @@ const App: React.FC = () => {
             exit={{ opacity: 0 }}
             >
                 <ProjectPlotsView 
-                    onBack={() => setCurrentView('history')}
+                    onBack={handleBackToHistory} // FIXED: Goes back to History
                     projectData={loadedProjectData}
                     plottingData={loadedPlottingData}
-                    projectId={loadedProjectId!} // <--- ADD THIS (The ! asserts it's not undefined)
+                    projectId={loadedProjectId!} 
                 />
             </motion.div>
         )}
