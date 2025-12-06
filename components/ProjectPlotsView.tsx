@@ -408,9 +408,10 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
         current.isPaid = true;
         const actualPaid = current.paidAmount === '' ? current.expectedAmount : Number(current.paidAmount);
         current.paidAmount = actualPaid; 
-        current.paymentDate = getLocalToday();
+        // Fix: Use the selected date, or default to today if user didn't pick one
+        current.paymentDate = current.paymentDate || getLocalToday();
 
-        const diff = current.expectedAmount - actualPaid; 
+        const diff = current.expectedAmount - actualPaid;
         
         // FIX: For Interim, update Expected to match Actual so it displays nicely
         if (current.isInterim) {
@@ -583,17 +584,42 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                         </button>
                                     </div>
 
-                                    {/* INLINE PAYMENT FORM */}
+                                   {/* INLINE PAYMENT FORM */}
                                     {isEditing && !isPaid && (
                                         <div className="bg-slate-50 border-t border-slate-200 p-4 grid gap-4 animate-in slide-in-from-top-2">
-                                            <div className="grid grid-cols-2 gap-4">
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                
+                                                {/* 1. Payment Date Picker */}
+                                                <div>
+                                                    <label className={labelClass}>Payment Date</label>
+                                                    <div className="relative w-full h-[42px] group">
+                                                        <input 
+                                                            type="date" 
+                                                            value={item.paymentDate || getLocalToday()} 
+                                                            onChange={(e) => updateScheduleRow(idx, 'paymentDate', e.target.value)} 
+                                                            onClick={(e) => {try{(e.target as HTMLInputElement).showPicker()}catch(err){}}} 
+                                                            className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" 
+                                                        />
+                                                        <div className="w-full h-full bg-white border border-slate-300 rounded-lg flex items-center px-3 gap-2 transition-all">
+                                                            <Calendar size={16} className="text-slate-400" />
+                                                            <span className="text-sm font-bold text-slate-800">{displayDate(item.paymentDate || getLocalToday())}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* 2. Amount */}
                                                 <div>
                                                     <label className={labelClass}>Amount Received</label>
-                                                    <div className="relative"><input type="text" inputMode="decimal" value={formatIndianInput(item.paidAmount)} onChange={(e) => updateScheduleRow(idx, 'paidAmount', parseInputNumber(e.target.value))} className={`${inputBase} pl-6 font-bold`} placeholder="Enter Amount" /><span className="absolute left-2.5 top-2.5 text-slate-400 text-xs">₹</span></div>
+                                                    <div className="relative h-[42px]">
+                                                        <input type="text" inputMode="decimal" value={formatIndianInput(item.paidAmount)} onChange={(e) => updateScheduleRow(idx, 'paidAmount', parseInputNumber(e.target.value))} className={`${inputBase} h-full pl-6 font-bold`} placeholder="Enter Amount" />
+                                                        <span className="absolute left-2.5 top-2.5 text-slate-400 text-xs">₹</span>
+                                                    </div>
                                                 </div>
+
+                                                {/* 3. Mode */}
                                                 <div>
                                                     <label className={labelClass}>Payment Mode</label>
-                                                    <div className="flex bg-white border border-slate-300 rounded-lg p-1">
+                                                    <div className="flex bg-white border border-slate-300 rounded-lg p-1 h-[42px]">
                                                         <button onClick={() => updateScheduleRow(idx, 'paymentMode', 'CASH')} className={`flex-1 py-1.5 text-xs font-bold rounded flex items-center justify-center gap-1 ${item.paymentMode === 'CASH' ? 'bg-emerald-500 text-white shadow' : 'text-slate-500'}`}><Banknote size={14}/> Cash</button>
                                                         <button onClick={() => updateScheduleRow(idx, 'paymentMode', 'BANK')} className={`flex-1 py-1.5 text-xs font-bold rounded flex items-center justify-center gap-1 ${item.paymentMode === 'BANK' ? 'bg-blue-500 text-white shadow' : 'text-slate-500'}`}><Landmark size={14}/> Bank</button>
                                                     </div>
