@@ -15,7 +15,10 @@ import {
   FileText,
   Landmark, 
   Banknote, 
-  MessageSquare 
+  MessageSquare,
+  PlusCircle,
+  User,
+  Trash2
 } from 'lucide-react';
 import { ProjectSavedState } from '../types';
 import { formatCurrency, formatInputNumber, parseInputNumber } from '../utils/formatters';
@@ -31,7 +34,7 @@ interface Props {
   projectId: number;
 }
 
-// --- UPDATED TYPES FOR DEAL & AUDIT ---
+// --- TYPES ---
 interface PaymentInstallment {
   id: number;
   label: string;
@@ -41,13 +44,16 @@ interface PaymentInstallment {
   // Payment State
   paidAmount: number | ''; 
   isPaid: boolean;
-  paymentDate?: string; // Date payment was actually made
+  paymentDate?: string;
   
   // Audit Details
   paymentMode?: 'CASH' | 'BANK';
   bankName?: string;
-  refNumber?: string; // Cheque or Transaction ID
+  refNumber?: string; 
   remarks?: string;
+  
+  // Flags
+  isInterim?: boolean; 
 }
 
 interface PlotDealState {
@@ -63,6 +69,11 @@ interface PlotDealState {
   
   numInstallments: string; 
   schedule: PaymentInstallment[];
+
+  // Agent
+  agentName?: string;
+  agentPhone?: string;
+  agentCommission?: string;
 }
 
 // Helpers
@@ -87,6 +98,15 @@ const displayDate = (dateStr: string) => {
 const formatIndianInput = (val: number | string) => {
     if (val === '' || val === undefined) return '';
     return val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+};
+
+// Sort helper: Keeps dates in order
+const sortScheduleByDate = (schedule: PaymentInstallment[]) => {
+    return [...schedule].sort((a, b) => {
+        const dateA = new Date(a.dueDate).getTime();
+        const dateB = new Date(b.dueDate).getTime();
+        return dateA - dateB;
+    });
 };
 
 export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottingData, projectId }) => {
@@ -282,6 +302,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
         dpDurationVal: '', dpDurationUnit: 'Months',
         totalDurationVal: '', totalDurationUnit: 'Months',
         numInstallments: '',
+        agentName: '', agentPhone: '', agentCommission: '',
         schedule: []
     });
 
@@ -299,8 +320,6 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
         const balance = totalValue - dpVal;
         const nInst = parseFloat(deal.numInstallments) || 0;
 
-        if (nInst <= 0) return;
-
         // Date Logic
         const safeStartStr = deal.startDate.includes('T') ? deal.startDate : `${deal.startDate}T12:00:00`;
         const start = new Date(safeStartStr);
@@ -310,78 +329,112 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
         if (deal.dpDurationUnit === 'Days') dpDate.setDate(dpDate.getDate() + dpNum);
         else dpDate.setMonth(dpDate.getMonth() + dpNum);
 
-        const totalNum = parseFloat(deal.totalDurationVal) || 0;
-        const endDate = new Date(start); 
-        if (deal.totalDurationUnit === 'Days') endDate.setDate(endDate.getDate() + totalNum);
-        else endDate.setMonth(endDate.getMonth() + totalNum);
-
-        const timeSpan = endDate.getTime() - dpDate.getTime();
-        const intervalMs = nInst > 0 ? Math.max(0, timeSpan) / Math.ceil(nInst) : 0;
-        const instAmount = nInst > 0 ? Math.round(balance / nInst) : 0; 
         const newSchedule: PaymentInstallment[] = [];
 
+        // Row 1: Down Payment
         newSchedule.push({
             id: 1, label: 'Down Payment', dueDate: dpDate.toISOString().split('T')[0],
             expectedAmount: dpVal, paidAmount: '', isPaid: false
         });
 
-        const count = Math.ceil(nInst);
-        let runningBalance = balance;
+        // Generate Installments only if count > 0
+        if (nInst > 0) {
+            const totalNum = parseFloat(deal.totalDurationVal) || 0;
+            const endDate = new Date(start); 
+            if (deal.totalDurationUnit === 'Days') endDate.setDate(endDate.getDate() + totalNum);
+            else endDate.setMonth(endDate.getMonth() + totalNum);
 
-        for(let i = 0; i < count; i++) {
-            let amount = instAmount;
-            if (i === count - 1) amount = runningBalance;
-            else runningBalance -= amount;
-            
-            const instDate = new Date(dpDate.getTime() + ((i + 1) * intervalMs));
-            newSchedule.push({
-                id: i + 2, label: `Installment ${i + 1}`, dueDate: instDate.toISOString().split('T')[0],
-                expectedAmount: amount, paidAmount: '', isPaid: false
-            });
+            const timeSpan = endDate.getTime() - dpDate.getTime();
+            const intervalMs = Math.max(0, timeSpan) / Math.ceil(nInst);
+            const instAmount = Math.round(balance / nInst); 
+
+            const count = Math.ceil(nInst);
+            let runningBalance = balance;
+
+            for(let i = 0; i < count; i++) {
+                let amount = instAmount;
+                if (i === count - 1) amount = runningBalance;
+                else runningBalance -= amount;
+                
+                const instDate = new Date(dpDate.getTime() + ((i + 1) * intervalMs));
+                newSchedule.push({
+                    id: i + 2, label: `Installment ${i + 1}`, dueDate: instDate.toISOString().split('T')[0],
+                    expectedAmount: amount, paidAmount: '', isPaid: false
+                });
+            }
         }
         setDeal({ ...deal, schedule: newSchedule });
     };
 
-    // Update fields inside a schedule row
+    const handleAddInterim = () => {
+        const newRow: PaymentInstallment = {
+            id: Date.now(),
+            label: 'Interim Payment',
+            dueDate: getLocalToday(),
+            expectedAmount: 0, 
+            paidAmount: '',
+            isPaid: false,
+            isInterim: true
+        };
+        const newSchedule = [...deal.schedule, newRow];
+        const sorted = sortScheduleByDate(newSchedule);
+        setDeal({ ...deal, schedule: sorted });
+    };
+
+    const handleRemoveInterim = (id: number) => {
+        const newSchedule = deal.schedule.filter(s => s.id !== id);
+        setDeal({ ...deal, schedule: newSchedule });
+    }
+
     const updateScheduleRow = (index: number, field: keyof PaymentInstallment, val: any) => {
         const newSchedule = [...deal.schedule];
         newSchedule[index] = { ...newSchedule[index], [field]: val };
         setDeal({ ...deal, schedule: newSchedule });
     };
 
-    // Handle manual date picker change
     const handleDateChange = (index: number, val: string) => {
         const newSchedule = [...deal.schedule];
         newSchedule[index] = { ...newSchedule[index], dueDate: val };
-        setDeal({ ...deal, schedule: newSchedule });
+        
+        // Auto-sort when date changes so user sees it move to correct position
+        const sorted = sortScheduleByDate(newSchedule);
+        setDeal({ ...deal, schedule: sorted });
     };
 
     const confirmPayment = (index: number) => {
         const newSchedule = [...deal.schedule];
         const current = newSchedule[index];
         
-        // 1. Mark Paid
         current.isPaid = true;
-        // If they didn't type an amount, assume full payment
         const actualPaid = current.paidAmount === '' ? current.expectedAmount : Number(current.paidAmount);
         current.paidAmount = actualPaid; 
-        current.paymentDate = getLocalToday(); // Record today's date
+        current.paymentDate = getLocalToday();
 
-        // 2. Adjust Next Installment
         const diff = current.expectedAmount - actualPaid; 
-        if (index + 1 < newSchedule.length && diff !== 0) {
-            newSchedule[index + 1].expectedAmount += diff;
+        
+        // FIX: For Interim, update Expected to match Actual so it displays nicely
+        if (current.isInterim) {
+            current.expectedAmount = actualPaid;
         }
 
-        setDeal({ ...deal, schedule: newSchedule });
-        setActivePaymentRow(null); // Close the drawer
+        // Adjust Next Unpaid Row
+        let adjusted = false;
+        for (let i = index + 1; i < newSchedule.length; i++) {
+            if (!newSchedule[i].isPaid) {
+                newSchedule[i].expectedAmount += diff;
+                adjusted = true;
+                break; 
+            }
+        }
+
+        const sorted = sortScheduleByDate(newSchedule);
+        setDeal({ ...deal, schedule: sorted });
+        setActivePaymentRow(null);
     };
 
     const undoPayment = (index: number) => {
         const newSchedule = [...deal.schedule];
         newSchedule[index].isPaid = false;
-        // Ideally we revert the math adjustment, but that requires complex history tracking.
-        // For now, simpler to just uncheck. User can manually fix next row amounts if needed.
         setDeal({ ...deal, schedule: newSchedule });
     };
 
@@ -413,6 +466,10 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
         });
     };
 
+    // Calculate Footer Totals
+    const totalPaid = deal.schedule.reduce((sum, item) => sum + (item.isPaid ? Number(item.paidAmount) : 0), 0);
+    const balanceDue = totalValue - totalPaid;
+
     return (
         <div className="space-y-6">
             
@@ -432,6 +489,16 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                 <div className="col-span-1"><label className={labelClass}>DP Window</label><div className="flex h-[42px]"><input type="number" inputMode="decimal" placeholder="0" value={deal.dpDurationVal} onChange={(e) => setDeal({...deal, dpDurationVal: e.target.value})} className={`${inputBase} h-full rounded-r-none border-r-0 text-center px-1 min-w-0`} /><select value={deal.dpDurationUnit} onChange={(e) => setDeal({...deal, dpDurationUnit: e.target.value as any})} className="bg-slate-100 border border-slate-300 border-l-0 rounded-r-lg px-2 text-xs font-bold text-slate-600 outline-none h-full"><option value="Months">Mth</option><option value="Days">Day</option></select></div></div>
                 <div className="col-span-1"><label className={labelClass}>Total Time</label><div className="flex h-[42px]"><input type="number" inputMode="decimal" placeholder="0" value={deal.totalDurationVal} onChange={(e) => setDeal({...deal, totalDurationVal: e.target.value})} className={`${inputBase} h-full rounded-r-none border-r-0 text-center px-1 min-w-0`} /><select value={deal.totalDurationUnit} onChange={(e) => setDeal({...deal, totalDurationUnit: e.target.value as any})} className="bg-slate-100 border border-slate-300 border-l-0 rounded-r-lg px-2 text-xs font-bold text-slate-600 outline-none h-full"><option value="Months">Mth</option><option value="Days">Day</option></select></div></div>
                 <div className="col-span-2 md:col-span-1"><label className={labelClass}>Installments</label><input type="number" inputMode="decimal" placeholder="e.g. 2.5" value={deal.numInstallments} onChange={(e) => setDeal({...deal, numInstallments: e.target.value})} className={`${inputBase} h-[42px]`} /></div>
+            </div>
+
+            {/* AGENT SECTION */}
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <div className="flex items-center gap-2 mb-2"><User size={14} className="text-slate-400" /><span className="text-xs font-bold text-slate-500 uppercase">Agent / Commission Details</span></div>
+                <div className="grid grid-cols-3 gap-3">
+                    <input type="text" placeholder="Agent Name" value={deal.agentName || ''} onChange={(e) => setDeal({...deal, agentName: e.target.value})} className={inputBase} />
+                    <input type="text" inputMode="tel" placeholder="Phone" value={deal.agentPhone || ''} onChange={(e) => setDeal({...deal, agentPhone: e.target.value})} className={inputBase} />
+                    <div className="relative"><input type="text" inputMode="decimal" placeholder="Commission" value={formatIndianInput(deal.agentCommission || '')} onChange={(e) => setDeal({...deal, agentCommission: parseInputNumber(e.target.value)})} className={`${inputBase} pl-6`} /><span className="absolute left-2.5 top-2.5 text-slate-400 text-xs">₹</span></div>
+                </div>
             </div>
 
             {deal.schedule.length === 0 && (
@@ -455,20 +522,42 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                 <div key={item.id} className={`transition-all ${isPaid ? 'bg-emerald-50/50' : ''}`}>
                                     {/* Main Row Content */}
                                     <div className="p-4 flex flex-col md:flex-row gap-4 items-center">
-                                        <div className="w-full md:w-32"><div className="font-bold text-slate-800 text-sm">{item.label}</div></div>
+                                        <div className="w-full md:w-32">
+                                            <div className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                                                {item.isInterim && <PlusCircle size={12} className="text-blue-500" />}
+                                                {item.label}
+                                                {item.isInterim && !isPaid && (
+                                                    <button onClick={() => handleRemoveInterim(item.id)} className="text-red-400 hover:text-red-600 ml-2"><Trash2 size={12}/></button>
+                                                )}
+                                            </div>
+                                        </div>
                                         
-                                        {/* Date (Editable only if not paid) */}
+                                        {/* Date */}
                                         <div className="flex-1 w-full md:w-auto">
                                             {isPaid ? (
                                                 <div className="text-xs font-bold text-emerald-700 flex items-center gap-1"><CheckCircle2 size={12}/> Paid on {displayDate(item.paymentDate || '')}</div>
                                             ) : (
-                                                <div className="relative w-full md:w-40 h-[36px] group"><input type="date" value={item.dueDate} onChange={(e) => handleDateChange(idx, e.target.value)} onClick={(e) => {try{(e.target as HTMLInputElement).showPicker()}catch(err){}}} className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer disabled:cursor-not-allowed [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" /><div className="w-full h-full border rounded-lg flex items-center px-3 gap-2 transition-all bg-white border-slate-200"><Calendar size={14} className="text-slate-400" /><span className="text-xs font-bold text-slate-700">{displayDate(item.dueDate)}</span></div></div>
+                                                <div className="relative w-full md:w-40 h-[36px] group"><input type="date" value={item.dueDate} onChange={(e) => handleDateChange(idx, e.target.value)} onClick={(e) => {try{(e.target as HTMLInputElement).showPicker()}catch(err){}}} className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" /><div className="w-full h-full border rounded-lg flex items-center px-3 gap-2 transition-all bg-white border-slate-200"><Calendar size={14} className="text-slate-400" /><span className="text-xs font-bold text-slate-700">{displayDate(item.dueDate)}</span></div></div>
                                             )}
                                         </div>
 
                                         <div className="w-full md:w-32 flex justify-between md:block text-right">
                                             <span className="md:hidden text-xs font-bold text-slate-400">Due:</span>
-                                            <div className="font-bold text-slate-600">{formatCurrency(item.expectedAmount)}</div>
+                                            {/* Allow editing Expected Amount ONLY for Interim payments that are not paid */}
+                                            {item.isInterim && !isPaid ? (
+                                                <div className="relative h-8">
+                                                    {/* FIX: BG-WHITE ADDED HERE */}
+                                                    <input 
+                                                        type="text" 
+                                                        inputMode="decimal"
+                                                        value={formatIndianInput(item.expectedAmount)}
+                                                        onChange={(e) => updateScheduleRow(idx, 'expectedAmount', parseInputNumber(e.target.value))}
+                                                        className="w-full text-right font-bold text-blue-600 border border-blue-200 rounded px-2 h-full outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                                                    />
+                                                </div>
+                                            ) : (
+                                                <div className="font-bold text-slate-600">{formatCurrency(item.expectedAmount)}</div>
+                                            )}
                                         </div>
 
                                         {/* Action Button */}
@@ -480,7 +569,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                         </button>
                                     </div>
 
-                                    {/* INLINE PAYMENT FORM (Visible when 'Record Payment' clicked) */}
+                                    {/* INLINE PAYMENT FORM */}
                                     {isEditing && !isPaid && (
                                         <div className="bg-slate-50 border-t border-slate-200 p-4 grid gap-4 animate-in slide-in-from-top-2">
                                             <div className="grid grid-cols-2 gap-4">
@@ -520,106 +609,170 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                         })}
                     </div>
 
-                    <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4">
-                        <p className="text-[10px] text-slate-400"><AlertCircle size={10} className="inline mr-1" /> Payment differences adjust next installment.</p>
+                    {/* LIVE TOTALS FOOTER */}
+                    <div className="bg-slate-50 border-t border-slate-200 p-4">
+                        <button onClick={handleAddInterim} className="w-full mb-4 border border-dashed border-slate-300 rounded-lg py-2 text-xs font-bold text-slate-500 hover:bg-white hover:text-orange-600 transition-all flex items-center justify-center gap-2"><PlusCircle size={14}/> Add Interim Payment</button>
+                        
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                            <div className="bg-white rounded p-2 border border-slate-200"><div className="text-[10px] text-slate-400 uppercase font-bold">Total Deal</div><div className="text-sm font-bold text-slate-800">{formatCurrency(totalValue)}</div></div>
+                            <div className="bg-emerald-50 rounded p-2 border border-emerald-100"><div className="text-[10px] text-emerald-600 uppercase font-bold">Total Paid</div><div className="text-sm font-bold text-emerald-700">{formatCurrency(totalPaid)}</div></div>
+                            <div className="bg-orange-50 rounded p-2 border border-orange-100"><div className="text-[10px] text-orange-600 uppercase font-bold">Balance Due</div><div className="text-sm font-bold text-orange-700">{formatCurrency(balanceDue)}</div></div>
+                        </div>
+                    </div>
+
+                    <div className="p-4 bg-white border-t border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4">
                         <div className="flex gap-3">
                             <button onClick={handleExportPDF} className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-slate-50 transition-all flex items-center gap-2"><FileText size={16} className="text-red-500" /> <span className="hidden md:inline">Print PDF</span></button>
                             <button onClick={triggerSave} disabled={isSaving} className="bg-slate-900 text-white px-6 py-2 rounded-lg font-bold text-sm shadow-lg hover:bg-black transition-all flex items-center gap-2 disabled:opacity-70">{isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}{isSaving ? 'Saving...' : 'Save Record'}</button>
                         </div>
                     </div>
 
-                    {/* --- PDF TEMPLATE (UPDATED HEADER & TOTALS) --- */}
-                    <div id={`pdf-template-${plotId}`} style={{ display: 'none', width: '700px', backgroundColor: '#fff', color: '#000000', fontFamily: 'sans-serif', fontSize: '11px', lineHeight: '1.5' }}>
-                        <div style={{ padding: '40px' }}>
-                            {/* HEADER */}
-                            <div style={{ borderBottom: '2px solid #ea580c', paddingBottom: '15px', marginBottom: '25px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    {/* --- PDF TEMPLATE (PROFESSIONAL DESIGN) --- */}
+                    <div id={`pdf-template-${plotId}`} style={{ display: 'none', width: '750px', backgroundColor: '#ffffff', fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif', color: '#1f2937' }}>
+                        
+                        {/* BORDER CONTAINER */}
+                        <div style={{ padding: '40px', position: 'relative' }}>
+                            
+                            {/* 1. HEADER */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '3px solid #f97316', paddingBottom: '20px', marginBottom: '30px' }}>
                                 <div>
-                                    <h1 style={{ fontSize: '22px', fontWeight: 'bold', margin: 0, color: '#000000' }}>PLOT SALE AGREEMENT</h1>
-                                    <div style={{ marginTop: '8px' }}>
-                                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#1e293b' }}>{plotData.customerName || 'Customer Name'}</div>
-                                        <div style={{ fontSize: '12px', color: '#64748b' }}>{plotData.phoneNumber || '-'}</div>
-                                    </div>
+                                    <h1 style={{ fontSize: '24px', fontWeight: '800', margin: '0 0 5px 0', color: '#111827', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Plot Sale Agreement</h1>
+                                    <div style={{ fontSize: '12px', color: '#6b7280', fontWeight: '500' }}>AGREEMENT REF: {new Date().getFullYear()}-{plotData.plotNumber}</div>
                                 </div>
                                 <div style={{ textAlign: 'right' }}>
-                                    <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#64748b', letterSpacing: '1px' }}>{projectIdentity.village || 'Project Name'}</div>
-                                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#ea580c', margin: '5px 0' }}>#{plotData.plotNumber}</div>
-                                    <div style={{ fontSize: '11px', color: '#000000' }}>{displayDate(new Date().toISOString())}</div>
+                                    <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#f97316', textTransform: 'uppercase' }}>{projectIdentity.village || 'Project Name'}</div>
+                                    <div style={{ fontSize: '11px', color: '#374151', marginTop: '4px' }}>Date: {displayDate(new Date().toISOString())}</div>
                                 </div>
                             </div>
 
-                            {/* DEAL SUMMARY (Now with Pending Amount) */}
-                            {(() => {
-                                const totalPaid = deal.schedule.reduce((sum, item) => sum + (item.isPaid ? Number(item.paidAmount) : 0), 0);
-                                const pending = totalValue - totalPaid;
+                            {/* 2. PARTY DETAILS (GRID LAYOUT) */}
+                            <div style={{ display: 'flex', gap: '30px', marginBottom: '30px' }}>
+                                {/* CUSTOMER BOX */}
+                                <div style={{ flex: 1, backgroundColor: '#f9fafb', padding: '15px', borderRadius: '4px', border: '1px solid #e5e7eb' }}>
+                                    <h3 style={{ margin: '0 0 10px 0', fontSize: '11px', textTransform: 'uppercase', color: '#9ca3af', fontWeight: 'bold', letterSpacing: '1px' }}>Buyer Details</h3>
+                                    <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#111827', marginBottom: '2px' }}>{plotData.customerName || 'N/A'}</div>
+                                    <div style={{ fontSize: '12px', color: '#4b5563' }}>Phone: {plotData.phoneNumber || '-'}</div>
+                                </div>
+
+                                {/* PROPERTY BOX */}
+                                <div style={{ flex: 1, backgroundColor: '#f9fafb', padding: '15px', borderRadius: '4px', border: '1px solid #e5e7eb' }}>
+                                    <h3 style={{ margin: '0 0 10px 0', fontSize: '11px', textTransform: 'uppercase', color: '#9ca3af', fontWeight: 'bold', letterSpacing: '1px' }}>Property Details</h3>
+                                    <table style={{ width: '100%', fontSize: '12px' }}>
+                                        <tbody>
+                                            <tr>
+                                                <td style={{ paddingBottom: '4px', color: '#6b7280' }}>Plot Number:</td>
+                                                <td style={{ paddingBottom: '4px', fontWeight: 'bold', textAlign: 'right' }}>#{plotData.plotNumber}</td>
+                                            </tr>
+                                            <tr>
+                                                <td style={{ paddingBottom: '4px', color: '#6b7280' }}>Area:</td>
+                                                <td style={{ paddingBottom: '4px', fontWeight: 'bold', textAlign: 'right' }}>{formatInputNumber(plotData.areaVaar)} Vaar</td>
+                                            </tr>
+                                            <tr>
+                                                <td style={{ color: '#6b7280' }}>Dimensions:</td>
+                                                <td style={{ fontWeight: 'bold', textAlign: 'right' }}>{plotData.dimLengthFt} x {plotData.dimWidthFt} ft</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            {/* 3. FINANCIAL TERMS */}
+                            <div style={{ marginBottom: '30px' }}>
+                                <div style={{ padding: '8px 0', borderBottom: '2px solid #e5e7eb', marginBottom: '15px', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', color: '#374151' }}>Financial Terms</div>
                                 
-                                return (
-                                <div style={{ marginBottom: '30px' }}>
-                                    <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #9ca3af', paddingBottom: '5px', marginBottom: '10px', color: '#000000', textTransform: 'uppercase' }}>Financial Summary</h3>
-                                    <div style={{ display: 'flex', gap: '10px' }}>
-                                        <div style={{ flex: 1, backgroundColor: '#f3f4f6', padding: '15px', borderRadius: '6px' }}>
-                                            <div style={{ fontSize: '10px', color: '#475569' }}>Total Deal Value</div>
-                                            <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#0f172a' }}>{formatCurrency(totalValue)}</div>
-                                        </div>
-                                        <div style={{ flex: 1, backgroundColor: '#ecfdf5', padding: '15px', borderRadius: '6px' }}>
-                                            <div style={{ fontSize: '10px', color: '#065f46' }}>Total Received</div>
-                                            <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#059669' }}>{formatCurrency(totalPaid)}</div>
-                                        </div>
-                                        <div style={{ flex: 1, backgroundColor: '#fff7ed', padding: '15px', borderRadius: '6px' }}>
-                                            <div style={{ fontSize: '10px', color: '#9a3412' }}>Balance Due</div>
-                                            <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#ea580c' }}>{formatCurrency(pending)}</div>
-                                        </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
+                                    <div style={{ textAlign: 'center', flex: 1, borderRight: '1px solid #e5e7eb' }}>
+                                        <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#6b7280' }}>Total Deal Value</div>
+                                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#111827', marginTop: '4px' }}>{formatCurrency(totalValue)}</div>
                                     </div>
-                                    <div style={{ marginTop: '10px', fontSize: '11px', display: 'flex', gap: '20px' }}>
-                                        <span><strong>Area:</strong> {formatInputNumber(plotData.areaVaar)} Vaar</span>
-                                        <span><strong>Duration:</strong> {deal.totalDurationVal} {deal.totalDurationUnit}</span>
-                                        <span><strong>Installments:</strong> {deal.numInstallments}</span>
+                                    <div style={{ textAlign: 'center', flex: 1, borderRight: '1px solid #e5e7eb' }}>
+                                        <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#6b7280' }}>Down Payment</div>
+                                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#111827', marginTop: '4px' }}>{formatCurrency(Number(deal.dpAmount))}</div>
+                                        <div style={{ fontSize: '9px', color: '#9ca3af' }}>{deal.dpDurationVal} {deal.dpDurationUnit} window</div>
+                                    </div>
+                                    <div style={{ textAlign: 'center', flex: 1, borderRight: '1px solid #e5e7eb' }}>
+                                        <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#6b7280' }}>Total Paid</div>
+                                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#059669', marginTop: '4px' }}>{formatCurrency(totalPaid)}</div>
+                                    </div>
+                                    <div style={{ textAlign: 'center', flex: 1 }}>
+                                        <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#6b7280' }}>Balance Due</div>
+                                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#dc2626', marginTop: '4px' }}>{formatCurrency(balanceDue)}</div>
                                     </div>
                                 </div>
-                                )
-                            })()}
 
-                            {/* SCHEDULE TABLE */}
+                                {/* Agent Row */}
+                                {(deal.agentName || deal.agentPhone) && (
+                                    <div style={{ backgroundColor: '#fff7ed', padding: '8px 12px', borderRadius: '4px', fontSize: '10px', color: '#9a3412', display: 'flex', gap: '20px' }}>
+                                        <span><strong>Agent:</strong> {deal.agentName || 'N/A'}</span>
+                                        <span><strong>Contact:</strong> {deal.agentPhone || 'N/A'}</span>
+                                        {deal.agentCommission && <span><strong>Commission:</strong> {formatCurrency(Number(deal.agentCommission))}</span>}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* 4. PAYMENT SCHEDULE TABLE */}
                             <div>
-                                <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #9ca3af', paddingBottom: '5px', marginBottom: '10px', color: '#000000', textTransform: 'uppercase' }}>Payment Schedule & History</h3>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px' }}>
-                                    <thead style={{ backgroundColor: '#f1f5f9' }}>
-                                        <tr>
-                                            <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #9ca3af' }}>Installment</th>
-                                            <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #9ca3af' }}>Due Date</th>
-                                            <th style={{ padding: '8px', textAlign: 'right', borderBottom: '2px solid #9ca3af' }}>Expected</th>
-                                            <th style={{ padding: '8px', textAlign: 'right', borderBottom: '2px solid #9ca3af' }}>Paid</th>
-                                            <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #9ca3af', paddingLeft: '15px' }}>Details / Remarks</th>
+                                <div style={{ padding: '8px 0', borderBottom: '2px solid #e5e7eb', marginBottom: '10px', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', color: '#374151' }}>Payment Schedule</div>
+                                
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                                    <thead>
+                                        <tr style={{ backgroundColor: '#374151', color: '#ffffff' }}>
+                                            <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', borderRadius: '4px 0 0 4px' }}>Description</th>
+                                            <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500' }}>Due Date</th>
+                                            <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Expected</th>
+                                            <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Paid</th>
+                                            <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', width: '30%', borderRadius: '0 4px 4px 0' }}>Ref / Remarks</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {deal.schedule.map((item) => (
-                                            <tr key={item.id}>
-                                                <td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>{item.label}</td>
-                                                <td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>{displayDate(item.dueDate)}</td>
-                                                <td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0', textAlign: 'right' }}>{formatCurrency(item.expectedAmount)}</td>
-                                                <td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 'bold' }}>{item.isPaid ? formatCurrency(Number(item.paidAmount)) : '-'}</td>
-                                                <td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0', paddingLeft: '15px', color: '#475569' }}>
+                                        {deal.schedule.map((item, idx) => (
+                                            <tr key={item.id} style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f9fafb' }}>
+                                                <td style={{ padding: '10px 12px', color: '#111827' }}>{item.label}</td>
+                                                <td style={{ padding: '10px 12px', color: '#4b5563' }}>{displayDate(item.dueDate)}</td>
+                                                <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#111827' }}>{formatCurrency(item.expectedAmount)}</td>
+                                                <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: item.isPaid ? '#059669' : '#d1d5db' }}>
+                                                    {item.isPaid ? formatCurrency(Number(item.paidAmount)) : '-'}
+                                                </td>
+                                                <td style={{ padding: '10px 12px', fontSize: '10px', color: '#4b5563' }}>
                                                     {item.isPaid ? (
-                                                        <>
-                                                            <div><strong>{item.paymentMode || 'CASH'}</strong> {item.paymentDate ? `(${displayDate(item.paymentDate)})` : ''}</div>
-                                                            {item.paymentMode === 'BANK' && <div>{item.bankName} - {item.refNumber}</div>}
-                                                            {item.remarks && <div style={{fontStyle:'italic'}}>"{item.remarks}"</div>}
-                                                        </>
+                                                        <div style={{ lineHeight: '1.4' }}>
+                                                            <div style={{ fontWeight: 'bold' }}>{item.paymentMode || 'CASH'}</div>
+                                                            {item.paymentMode === 'BANK' && <div>{item.bankName} #{item.refNumber}</div>}
+                                                            {item.remarks && <div style={{ fontStyle: 'italic', color: '#6b7280' }}>"{item.remarks}"</div>}
+                                                        </div>
                                                     ) : (
-                                                        <span style={{color:'#cbd5e1'}}>Pending</span>
+                                                        <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>Pending</span>
                                                     )}
                                                 </td>
                                             </tr>
                                         ))}
                                     </tbody>
+                                    <tfoot>
+                                        <tr style={{ borderTop: '2px solid #374151' }}>
+                                            <td colSpan={2} style={{ padding: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Total</td>
+                                            <td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(totalValue)}</td>
+                                            <td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold', color: '#059669' }}>{formatCurrency(totalPaid)}</td>
+                                            <td></td>
+                                        </tr>
+                                    </tfoot>
                                 </table>
                             </div>
-                            
-                            <div style={{ marginTop: '50px', borderTop: '1px solid #e5e7eb', paddingTop: '10px', display: 'flex', justifyContent: 'space-between' }}>
-                                <div style={{ textAlign: 'center', width: '150px' }}><div style={{ height: '40px' }}></div><div style={{ borderTop: '1px solid #000' }}></div><div style={{ fontSize: '10px', marginTop: '5px' }}>Customer Signature</div></div>
-                                <div style={{ textAlign: 'center', width: '150px' }}><div style={{ height: '40px' }}></div><div style={{ borderTop: '1px solid #000' }}></div><div style={{ fontSize: '10px', marginTop: '5px' }}>Authorized Signatory</div></div>
+
+                            {/* 5. FOOTER / SIGNATURES */}
+                            <div style={{ marginTop: '60px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', pageBreakInside: 'avoid' }}>
+                                <div style={{ textAlign: 'center' }}>
+                                    <div style={{ borderTop: '1px solid #111827', width: '180px', margin: '0 auto 8px' }}></div>
+                                    <div style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' }}>Customer Signature</div>
+                                </div>
+                                <div style={{ textAlign: 'center' }}>
+                                    <div style={{ borderTop: '1px solid #111827', width: '180px', margin: '0 auto 8px' }}></div>
+                                    <div style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' }}>Authorized Signatory</div>
+                                    <div style={{ fontSize: '9px', color: '#6b7280' }}>For {projectIdentity.village || 'Company'}</div>
+                                </div>
                             </div>
+
                         </div>
+                    
                     </div>
                 </div>
             )}
