@@ -329,25 +329,40 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
         if (deal.dpDurationUnit === 'Days') dpDate.setDate(dpDate.getDate() + dpNum);
         else dpDate.setMonth(dpDate.getMonth() + dpNum);
 
+        const totalNum = parseFloat(deal.totalDurationVal) || 0;
+        const endDate = new Date(start); 
+        if (deal.totalDurationUnit === 'Days') endDate.setDate(endDate.getDate() + totalNum);
+        else endDate.setMonth(endDate.getMonth() + totalNum);
+
+        const timeSpan = endDate.getTime() - dpDate.getTime();
+        const intervalMs = nInst > 0 ? Math.max(0, timeSpan) / Math.ceil(nInst) : 0;
+
+        const instAmount = nInst > 0 ? Math.round(balance / nInst) : 0; 
         const newSchedule: PaymentInstallment[] = [];
 
+        // 1. SPOT DEAL CHECK (No DP, No Installments -> Full Payment)
+        if (dpVal === 0 && nInst === 0) {
+             newSchedule.push({
+                id: 1, 
+                label: 'Full Payment', 
+                dueDate: start.toISOString().split('T')[0], // Due Immediately
+                expectedAmount: totalValue, 
+                paidAmount: '', 
+                isPaid: false
+            });
+            setDeal({ ...deal, schedule: newSchedule });
+            return;
+        }
+
+        // 2. STANDARD DEAL
         // Row 1: Down Payment
         newSchedule.push({
             id: 1, label: 'Down Payment', dueDate: dpDate.toISOString().split('T')[0],
             expectedAmount: dpVal, paidAmount: '', isPaid: false
         });
 
-        // Generate Installments only if count > 0
+        // Row 2+: Installments
         if (nInst > 0) {
-            const totalNum = parseFloat(deal.totalDurationVal) || 0;
-            const endDate = new Date(start); 
-            if (deal.totalDurationUnit === 'Days') endDate.setDate(endDate.getDate() + totalNum);
-            else endDate.setMonth(endDate.getMonth() + totalNum);
-
-            const timeSpan = endDate.getTime() - dpDate.getTime();
-            const intervalMs = Math.max(0, timeSpan) / Math.ceil(nInst);
-            const instAmount = Math.round(balance / nInst); 
-
             const count = Math.ceil(nInst);
             let runningBalance = balance;
 
