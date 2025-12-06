@@ -558,21 +558,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
 
                                         <div className="w-full md:w-32 flex justify-between md:block text-right">
                                             <span className="md:hidden text-xs font-bold text-slate-400">Due:</span>
-                                            {/* Allow editing Expected Amount ONLY for Interim payments that are not paid */}
-                                            {item.isInterim && !isPaid ? (
-                                                <div className="relative h-8">
-                                                    {/* FIX: BG-WHITE ADDED HERE */}
-                                                    <input 
-                                                        type="text" 
-                                                        inputMode="decimal"
-                                                        value={formatIndianInput(item.expectedAmount)}
-                                                        onChange={(e) => updateScheduleRow(idx, 'expectedAmount', parseInputNumber(e.target.value))}
-                                                        className="w-full text-right font-bold text-blue-600 border border-blue-200 rounded px-2 h-full outline-none focus:ring-1 focus:ring-blue-500 bg-white"
-                                                    />
-                                                </div>
-                                            ) : (
-                                                <div className="font-bold text-slate-600">{formatCurrency(item.expectedAmount)}</div>
-                                            )}
+                                            <div className="font-bold text-slate-600">{formatCurrency(item.expectedAmount)}</div>
                                         </div>
 
                                         {/* Action Button */}
