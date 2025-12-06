@@ -532,12 +532,26 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                             </div>
                                         </div>
                                         
-                                        {/* Date */}
-                                        <div className="flex-1 w-full md:w-auto">
-                                            {isPaid ? (
-                                                <div className="text-xs font-bold text-emerald-700 flex items-center gap-1"><CheckCircle2 size={12}/> Paid on {displayDate(item.paymentDate || '')}</div>
-                                            ) : (
-                                                <div className="relative w-full md:w-40 h-[36px] group"><input type="date" value={item.dueDate} onChange={(e) => handleDateChange(idx, e.target.value)} onClick={(e) => {try{(e.target as HTMLInputElement).showPicker()}catch(err){}}} className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" /><div className="w-full h-full border rounded-lg flex items-center px-3 gap-2 transition-all bg-white border-slate-200"><Calendar size={14} className="text-slate-400" /><span className="text-xs font-bold text-slate-700">{displayDate(item.dueDate)}</span></div></div>
+                                        {/* Date (Shows Due + Paid if applicable) */}
+                                        <div className="flex-1 w-full md:w-auto flex flex-col justify-center">
+                                            <div className={`relative w-full md:w-40 h-[36px] group ${isPaid ? 'opacity-70' : ''}`}>
+                                                <input 
+                                                    type="date" 
+                                                    value={item.dueDate} 
+                                                    disabled={isPaid} // Lock due date if paid
+                                                    onChange={(e) => handleDateChange(idx, e.target.value)} 
+                                                    onClick={(e) => {try{(e.target as HTMLInputElement).showPicker()}catch(err){}}} 
+                                                    className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer disabled:cursor-not-allowed" 
+                                                />
+                                                <div className="w-full h-full border rounded-lg flex items-center px-3 gap-2 transition-all bg-white border-slate-200">
+                                                    <Calendar size={14} className="text-slate-400" />
+                                                    <span className="text-xs font-bold text-slate-700">{displayDate(item.dueDate)}</span>
+                                                </div>
+                                            </div>
+                                            {isPaid && (
+                                                <div className="text-[10px] font-bold text-emerald-600 flex items-center gap-1 mt-1 pl-1">
+                                                    <CheckCircle2 size={10}/> Pd: {displayDate(item.paymentDate || '')}
+                                                </div>
                                             )}
                                         </div>
 
@@ -728,7 +742,14 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                         {deal.schedule.map((item, idx) => (
                                             <tr key={item.id} style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f9fafb' }}>
                                                 <td style={{ padding: '10px 12px', color: '#111827' }}>{item.label}</td>
-                                                <td style={{ padding: '10px 12px', color: '#4b5563' }}>{displayDate(item.dueDate)}</td>
+                                                <td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>
+                                                    <div>{displayDate(item.dueDate)}</div>
+                                                    {item.isPaid && item.paymentDate && (
+                                                        <div style={{ fontSize: '9px', color: '#059669', fontWeight: 'bold', marginTop: '2px' }}>
+                                                            Pd: {displayDate(item.paymentDate)}
+                                                        </div>
+                                                    )}
+                                                </td>
                                                 <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#111827' }}>{formatCurrency(item.expectedAmount)}</td>
                                                 <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: item.isPaid ? '#059669' : '#d1d5db' }}>
                                                     {item.isPaid ? formatCurrency(Number(item.paidAmount)) : '-'}
