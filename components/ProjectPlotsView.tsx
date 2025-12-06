@@ -571,9 +571,14 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                             )}
                                         </div>
 
-                                        <div className="w-full md:w-32 flex justify-between md:block text-right">
+                                       <div className="w-full md:w-32 flex justify-between md:block text-right">
                                             <span className="md:hidden text-xs font-bold text-slate-400">Due:</span>
                                             <div className="font-bold text-slate-600">{formatCurrency(item.expectedAmount)}</div>
+                                            {item.isPaid && (
+                                                <div className="text-[10px] font-bold text-emerald-600 mt-1">
+                                                    Pd: {formatCurrency(Number(item.paidAmount))}
+                                                </div>
+                                            )}
                                         </div>
 
                                         {/* Action Button */}
@@ -759,10 +764,9 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                     <thead>
                                         <tr style={{ backgroundColor: '#374151', color: '#ffffff' }}>
                                             <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', borderRadius: '4px 0 0 4px' }}>Description</th>
-                                            <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500' }}>Due Date</th>
-                                            <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Expected</th>
-                                            <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Paid</th>
-                                            <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', width: '30%', borderRadius: '0 4px 4px 0' }}>Ref / Remarks</th>
+                                           <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500' }}>Due Date</th>
+                                            <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Amount (Due / Paid)</th>
+                                            <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', width: '35%', borderRadius: '0 4px 4px 0' }}>Ref / Remarks</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -777,9 +781,13 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                                         </div>
                                                     )}
                                                 </td>
-                                                <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#111827' }}>{formatCurrency(item.expectedAmount)}</td>
-                                                <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: item.isPaid ? '#059669' : '#d1d5db' }}>
-                                                    {item.isPaid ? formatCurrency(Number(item.paidAmount)) : '-'}
+                                               <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#111827' }}>
+                                                    <div>{formatCurrency(item.expectedAmount)}</div>
+                                                    {item.isPaid && (
+                                                        <div style={{ fontSize: '9px', color: '#059669', marginTop: '2px' }}>
+                                                            Pd: {formatCurrency(Number(item.paidAmount))}
+                                                        </div>
+                                                    )}
                                                 </td>
                                                 <td style={{ padding: '10px 12px', fontSize: '10px', color: '#4b5563' }}>
                                                     {item.isPaid ? (
@@ -798,8 +806,10 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                     <tfoot>
                                         <tr style={{ borderTop: '2px solid #374151' }}>
                                             <td colSpan={2} style={{ padding: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Total</td>
-                                            <td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(totalValue)}</td>
-                                            <td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold', color: '#059669' }}>{formatCurrency(totalPaid)}</td>
+                                            <td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold' }}>
+                                                <div>{formatCurrency(totalValue)}</div>
+                                                <div style={{ fontSize: '10px', color: '#059669', marginTop: '2px' }}>Pd: {formatCurrency(totalPaid)}</div>
+                                            </td>
                                             <td></td>
                                         </tr>
                                     </tfoot>
