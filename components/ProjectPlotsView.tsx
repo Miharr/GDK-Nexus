@@ -219,7 +219,6 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
                         const isExpanded = expandedPlotId === plot.id;
                         
                         const deal = plot.dealStructure;
-                        // Crash Proof Checks
                         const hasActiveDeal = deal && Array.isArray(deal.schedule) && deal.schedule.length > 0;
                         const isDealClosed = hasActiveDeal && deal.schedule?.every((item: any) => item.isPaid);
 
@@ -386,25 +385,6 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
         setDeal({ ...deal, schedule: newSchedule });
     };
 
-    const handleAddInterim = () => {
-        const newRow: PaymentInstallment = {
-            id: Date.now(),
-            label: 'Interim Payment',
-            dueDate: getLocalToday(),
-            expectedAmount: 0, 
-            paidAmount: '',
-            isPaid: false,
-            isInterim: true
-        };
-        const newSchedule = [...deal.schedule, newRow];
-        const sorted = sortScheduleByDate(newSchedule);
-        setDeal({ ...deal, schedule: sorted });
-    };
-
-    const handleRemoveInterim = (id: number) => {
-        const newSchedule = deal.schedule.filter(s => s.id !== id);
-        setDeal({ ...deal, schedule: newSchedule });
-    }
 
     const updateScheduleRow = (index: number, field: keyof PaymentInstallment, val: any) => {
         const newSchedule = [...deal.schedule];
@@ -415,38 +395,44 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
     const handleDateChange = (index: number, val: string) => {
         const newSchedule = [...deal.schedule];
         newSchedule[index] = { ...newSchedule[index], dueDate: val };
-        // Auto-sort when date changes
         const sorted = sortScheduleByDate(newSchedule);
         setDeal({ ...deal, schedule: sorted });
     };
 
-    // --- SMART LOGIC: SPLIT & SPILLOVER ---
+    // --- NEW SMART PAYMENT LOGIC (HISTORY & CARRY-FORWARD) ---
     const confirmPayment = (index: number) => {
         let newSchedule = [...deal.schedule];
         const current = newSchedule[index];
         
-        // 1. Update Current Row
+        // 1. Get Payment Details
         const actualPaid = current.paidAmount === '' ? current.expectedAmount : Number(current.paidAmount);
-        const originalExpected = current.expectedAmount;
+        const originalDue = current.expectedAmount;
         
+        // 2. Mark Current Row as Fully Paid History Item
         current.isPaid = true;
         current.paidAmount = actualPaid; 
-        current.paymentDate = current.paymentDate || getLocalToday(); // Use existing or today
+        current.paymentDate = current.paymentDate || getLocalToday();
 
-        const diff = originalExpected - actualPaid; 
+        const remainingBalance = originalDue - actualPaid; 
 
-        // 2. Logic Branching
-        if (diff > 0) {
-            // Case A: Partial Payment (SPLIT)
-            // Current becomes the paid portion
-            current.expectedAmount = actualPaid; 
+        // 3. Logic Branching
+        if (remainingBalance > 0) {
+            // Case A: Partial Payment -> Create Carry-Forward Row
+            // Current row stays as history (Due: Original, Paid: Actual)
             
-            // Create Balance Row
+            // Clean naming to avoid (Bal) (Bal)
+            let baseLabel = current.label;
+            if (baseLabel.includes('(Balance)')) {
+                // Keep same name if it's already a balance row
+            } else {
+                baseLabel = `${baseLabel} (Balance)`;
+            }
+
             const balRow: PaymentInstallment = {
                 ...current,
                 id: Date.now(),
-                label: `${current.label} (Bal)`,
-                expectedAmount: diff,
+                label: baseLabel,
+                expectedAmount: remainingBalance, // This is the new debt
                 paidAmount: '',
                 isPaid: false,
                 isInterim: false,
@@ -456,33 +442,27 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                 refNumber: undefined,
                 remarks: undefined
             };
-            // Insert after current
+            // Insert immediately after
             newSchedule.splice(index + 1, 0, balRow);
 
-        } else if (diff < 0) {
-            // Case B: Overpayment / Interim (SPILLOVER)
-            // Current expected matches paid so it looks clean
-            current.expectedAmount = actualPaid; 
-            
-            let excess = Math.abs(diff); // Amount to deduct from future
+        } else if (remainingBalance < 0) {
+            // Case B: Overpayment -> Deduct from NEXT unpaid item
+            let excess = Math.abs(remainingBalance);
             
             for (let i = index + 1; i < newSchedule.length; i++) {
-                if (newSchedule[i].isPaid) continue; // Skip already paid rows
+                if (newSchedule[i].isPaid) continue; 
                 
                 if (newSchedule[i].expectedAmount >= excess) {
                     newSchedule[i].expectedAmount -= excess;
                     excess = 0;
                     break;
                 } else {
-                    // This row is smaller than excess, wipe it out and carry over
                     excess -= newSchedule[i].expectedAmount;
                     newSchedule[i].expectedAmount = 0; 
                 }
             }
         }
 
-        // 3. Final Sort & Save
-        // We don't sort here to keep the Split row immediately after the parent
         setDeal({ ...deal, schedule: newSchedule });
         setActivePaymentRow(null);
     };
@@ -490,8 +470,6 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
     const undoPayment = (index: number) => {
         const newSchedule = [...deal.schedule];
         newSchedule[index].isPaid = false;
-        // Ideally we revert splits/spillovers but that's complex history tracking.
-        // Simple undo just unchecks. User can manually edit amounts if needed.
         setDeal({ ...deal, schedule: newSchedule });
     };
 
@@ -523,10 +501,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
         });
     };
 
-    // --- RUNNING BALANCE CALCULATION FOR UI ---
-    let runningBalanceUI = totalValue;
-
-    // Calculate Footer Totals
+    // Calculate Totals for Footer
     const totalPaid = deal.schedule.reduce((sum, item) => sum + (item.isPaid ? Number(item.paidAmount) : 0), 0);
     const balanceDue = totalValue - totalPaid;
 
@@ -574,150 +549,147 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                     </div>
 
                     <div className="divide-y divide-slate-100">
-                        {(deal.schedule || []).map((item, idx) => {
-                            const isEditing = activePaymentRow === idx;
-                            const isPaid = item.isPaid;
+                        {(() => {
+                            let runningBalance = totalValue;
                             
-                            // Calc Balance for this row
-                            if (item.isPaid) {
-                                runningBalanceUI -= Number(item.paidAmount);
-                            }
+                            return (deal.schedule || []).map((item, idx) => {
+                                const isEditing = activePaymentRow === idx;
+                                const isPaid = item.isPaid;
+                                
+                                // Calc Balance for this row logic: Balance = Prev Balance - Paid
+                                // If not paid, balance doesn't reduce yet for display purposes usually, 
+                                // BUT per your requirement "Running Balance", we show what's left after this payment if paid.
+                                let displayBalance = runningBalance;
+                                if (isPaid) {
+                                    runningBalance -= Number(item.paidAmount);
+                                    displayBalance = runningBalance;
+                                }
 
-                            return (
-                                <div key={item.id} className={`transition-all ${isPaid ? 'bg-emerald-50/50' : ''}`}>
-                                    {/* Main Row Content */}
+                                return (
+                                    <div key={item.id} className={`transition-all ${isPaid ? 'bg-emerald-50/50' : ''}`}>
+                                       {/* Main Row Content */}
                                     <div className="p-4 flex flex-col md:flex-row gap-4 items-center">
                                         <div className="w-full md:w-32">
-                                            <div className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                                                {item.isInterim && <PlusCircle size={12} className="text-blue-500" />}
+                                            <div className="font-bold text-slate-800 text-sm">
                                                 {item.label}
-                                                {item.isInterim && !isPaid && (
-                                                    <button onClick={() => handleRemoveInterim(item.id)} className="text-red-400 hover:text-red-600 ml-2"><Trash2 size={12}/></button>
+                                            </div>
+                                        </div>
+                                            
+                                            {/* Date */}
+                                            <div className="flex-1 w-full md:w-auto flex flex-col justify-center">
+                                                <div className={`relative w-full md:w-40 h-[36px] group ${isPaid ? 'opacity-70' : ''}`}>
+                                                    <input 
+                                                        type="date" 
+                                                        value={item.dueDate} 
+                                                        disabled={isPaid} 
+                                                        onChange={(e) => handleDateChange(idx, e.target.value)} 
+                                                        onClick={(e) => {try{(e.target as HTMLInputElement).showPicker()}catch(err){}}} 
+                                                        className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer disabled:cursor-not-allowed [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" 
+                                                    />
+                                                    <div className="w-full h-full border rounded-lg flex items-center px-3 gap-2 transition-all bg-white border-slate-200">
+                                                        <Calendar size={14} className="text-slate-400" />
+                                                        <span className="text-xs font-bold text-slate-700">{displayDate(item.dueDate)}</span>
+                                                    </div>
+                                                </div>
+                                                {isPaid && (
+                                                    <div className="text-[10px] font-bold text-emerald-600 flex items-center gap-1 mt-1 pl-1">
+                                                        <CheckCircle2 size={10}/> Pd: {displayDate(item.paymentDate || '')}
+                                                    </div>
                                                 )}
                                             </div>
-                                        </div>
-                                        
-                                        {/* Date (Shows Due + Paid if applicable) */}
-                                        <div className="flex-1 w-full md:w-auto flex flex-col justify-center">
-                                            <div className={`relative w-full md:w-40 h-[36px] group ${isPaid ? 'opacity-70' : ''}`}>
-                                                <input 
-                                                    type="date" 
-                                                    value={item.dueDate} 
-                                                    disabled={isPaid} // Lock due date if paid
-                                                    onChange={(e) => handleDateChange(idx, e.target.value)} 
-                                                    onClick={(e) => {try{(e.target as HTMLInputElement).showPicker()}catch(err){}}} 
-                                                    className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer disabled:cursor-not-allowed [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" 
-                                                />
-                                                <div className="w-full h-full border rounded-lg flex items-center px-3 gap-2 transition-all bg-white border-slate-200">
-                                                    <Calendar size={14} className="text-slate-400" />
-                                                    <span className="text-xs font-bold text-slate-700">{displayDate(item.dueDate)}</span>
+
+                                           {/* Amounts + Running Balance */}
+                                           <div className="w-full md:w-48 flex justify-between md:block text-right">
+                                                <span className="md:hidden text-xs font-bold text-slate-400">Due:</span>
+                                                <div className="font-bold text-slate-600">{formatCurrency(item.expectedAmount)}</div>
+                                                {item.isPaid && (
+                                                    <div className="text-[10px] font-bold text-emerald-600 mt-1">
+                                                        Pd: {formatCurrency(Number(item.paidAmount))}
+                                                    </div>
+                                                )}
+                                                {/* LEDGER BALANCE DISPLAY */}
+                                                <div className="text-[10px] font-mono text-slate-400 mt-1 border-t border-slate-200 pt-1">
+                                                    Bal: {isPaid ? formatCurrency(displayBalance) : '-'}
                                                 </div>
                                             </div>
-                                            {isPaid && (
-                                                <div className="text-[10px] font-bold text-emerald-600 flex items-center gap-1 mt-1 pl-1">
-                                                    <CheckCircle2 size={10}/> Pd: {displayDate(item.paymentDate || '')}
-                                                </div>
-                                            )}
+
+                                            {/* Action Button */}
+                                            <button 
+                                                onClick={() => isPaid ? undoPayment(idx) : setActivePaymentRow(isEditing ? null : idx)}
+                                                className={`w-full md:w-auto px-4 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition-all ${isPaid ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-slate-900 text-white shadow-lg hover:bg-black'}`}
+                                            >
+                                                {isPaid ? 'Paid (Undo)' : 'Record Payment'}
+                                            </button>
                                         </div>
 
-                                       {/* Amounts + Running Balance */}
-                                       <div className="w-full md:w-48 flex justify-between md:block text-right">
-                                            <span className="md:hidden text-xs font-bold text-slate-400">Due:</span>
-                                            <div className="font-bold text-slate-600">{formatCurrency(item.expectedAmount)}</div>
-                                            {item.isPaid && (
-                                                <div className="text-[10px] font-bold text-emerald-600 mt-1">
-                                                    Pd: {formatCurrency(Number(item.paidAmount))}
-                                                </div>
-                                            )}
-                                            {/* BALANCE DISPLAY */}
-                                            {isPaid && (
-                                                <div className="text-[10px] font-mono text-slate-400 mt-1 border-t border-slate-200 pt-1">
-                                                    Bal: {formatCurrency(runningBalanceUI)}
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Action Button */}
-                                        <button 
-                                            onClick={() => isPaid ? undoPayment(idx) : setActivePaymentRow(isEditing ? null : idx)}
-                                            className={`w-full md:w-auto px-4 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition-all ${isPaid ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-slate-900 text-white shadow-lg hover:bg-black'}`}
-                                        >
-                                            {isPaid ? 'Paid (Undo)' : 'Record Payment'}
-                                        </button>
-                                    </div>
-
-                                   {/* INLINE PAYMENT FORM */}
+                                       {/* INLINE PAYMENT FORM */}
                                     {isEditing && !isPaid && (
                                         <div className="bg-slate-50 border-t border-slate-200 p-4 grid gap-4 animate-in slide-in-from-top-2">
-                                            {/* GRID ADJUSTMENT FOR INTERIM (Hide Date Picker) */}
-                                            <div className={`grid grid-cols-1 ${!item.isInterim ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-4`}>
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                                 
-                                                {/* 1. Payment Date Picker (Only for Regular) */}
-                                                {!item.isInterim && (
-                                                    <div>
-                                                        <label className={labelClass}>Payment Date</label>
-                                                        <div className="relative w-full h-[42px] group">
-                                                            <input 
-                                                                type="date" 
-                                                                value={item.paymentDate || getLocalToday()} 
-                                                                onChange={(e) => updateScheduleRow(idx, 'paymentDate', e.target.value)} 
-                                                                onClick={(e) => {try{(e.target as HTMLInputElement).showPicker()}catch(err){}}} 
-                                                                className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" 
-                                                            />
-                                                            <div className="w-full h-full bg-white border border-slate-300 rounded-lg flex items-center px-3 gap-2 transition-all">
-                                                                <Calendar size={16} className="text-slate-400" />
-                                                                <span className="text-sm font-bold text-slate-800">{displayDate(item.paymentDate || getLocalToday())}</span>
-                                                            </div>
+                                                {/* 1. Payment Date Picker */}
+                                                <div>
+                                                    <label className={labelClass}>Payment Date</label>
+                                                    <div className="relative w-full h-[42px] group">
+                                                        <input 
+                                                            type="date" 
+                                                            value={item.paymentDate || getLocalToday()} 
+                                                            onChange={(e) => updateScheduleRow(idx, 'paymentDate', e.target.value)} 
+                                                            onClick={(e) => {try{(e.target as HTMLInputElement).showPicker()}catch(err){}}} 
+                                                            className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" 
+                                                        />
+                                                        <div className="w-full h-full bg-white border border-slate-300 rounded-lg flex items-center px-3 gap-2 transition-all">
+                                                            <Calendar size={16} className="text-slate-400" />
+                                                            <span className="text-sm font-bold text-slate-800">{displayDate(item.paymentDate || getLocalToday())}</span>
                                                         </div>
+                                                    </div>
+                                                </div>
+
+                                                    {/* 2. Amount */}
+                                                    <div>
+                                                        <label className={labelClass}>Amount Received</label>
+                                                        <div className="relative h-[42px]">
+                                                            <input type="text" inputMode="decimal" value={formatIndianInput(item.paidAmount)} onChange={(e) => updateScheduleRow(idx, 'paidAmount', parseInputNumber(e.target.value))} className={`${inputBase} h-full pl-6 font-bold`} placeholder="Enter Amount" />
+                                                            <span className="absolute left-2.5 top-2.5 text-slate-400 text-xs">₹</span>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* 3. Mode */}
+                                                    <div>
+                                                        <label className={labelClass}>Payment Mode</label>
+                                                        <div className="flex bg-white border border-slate-300 rounded-lg p-1 h-[42px]">
+                                                            <button onClick={() => updateScheduleRow(idx, 'paymentMode', 'CASH')} className={`flex-1 py-1.5 text-xs font-bold rounded flex items-center justify-center gap-1 ${item.paymentMode === 'CASH' ? 'bg-emerald-500 text-white shadow' : 'text-slate-500'}`}><Banknote size={14}/> Cash</button>
+                                                            <button onClick={() => updateScheduleRow(idx, 'paymentMode', 'BANK')} className={`flex-1 py-1.5 text-xs font-bold rounded flex items-center justify-center gap-1 ${item.paymentMode === 'BANK' ? 'bg-blue-500 text-white shadow' : 'text-slate-500'}`}><Landmark size={14}/> Bank</button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {item.paymentMode === 'BANK' && (
+                                                    <div className="grid grid-cols-2 gap-4">
+                                                        <div><label className={labelClass}>Bank Name</label><input type="text" placeholder="e.g. HDFC" value={item.bankName || ''} onChange={(e) => updateScheduleRow(idx, 'bankName', e.target.value)} className={inputBase} /></div>
+                                                        <div><label className={labelClass}>Cheque / Ref No.</label><input type="text" placeholder="123456" value={item.refNumber || ''} onChange={(e) => updateScheduleRow(idx, 'refNumber', e.target.value)} className={inputBase} /></div>
                                                     </div>
                                                 )}
 
-                                                {/* 2. Amount */}
                                                 <div>
-                                                    <label className={labelClass}>Amount Received</label>
-                                                    <div className="relative h-[42px]">
-                                                        <input type="text" inputMode="decimal" value={formatIndianInput(item.paidAmount)} onChange={(e) => updateScheduleRow(idx, 'paidAmount', parseInputNumber(e.target.value))} className={`${inputBase} h-full pl-6 font-bold`} placeholder="Enter Amount" />
-                                                        <span className="absolute left-2.5 top-2.5 text-slate-400 text-xs">₹</span>
-                                                    </div>
+                                                    <label className={labelClass}>Remarks</label>
+                                                    <div className="relative"><input type="text" placeholder="Optional notes..." value={item.remarks || ''} onChange={(e) => updateScheduleRow(idx, 'remarks', e.target.value)} className={`${inputBase} pl-8`} /><MessageSquare size={14} className="absolute left-3 top-3 text-slate-400" /></div>
                                                 </div>
 
-                                                {/* 3. Mode */}
-                                                <div>
-                                                    <label className={labelClass}>Payment Mode</label>
-                                                    <div className="flex bg-white border border-slate-300 rounded-lg p-1 h-[42px]">
-                                                        <button onClick={() => updateScheduleRow(idx, 'paymentMode', 'CASH')} className={`flex-1 py-1.5 text-xs font-bold rounded flex items-center justify-center gap-1 ${item.paymentMode === 'CASH' ? 'bg-emerald-500 text-white shadow' : 'text-slate-500'}`}><Banknote size={14}/> Cash</button>
-                                                        <button onClick={() => updateScheduleRow(idx, 'paymentMode', 'BANK')} className={`flex-1 py-1.5 text-xs font-bold rounded flex items-center justify-center gap-1 ${item.paymentMode === 'BANK' ? 'bg-blue-500 text-white shadow' : 'text-slate-500'}`}><Landmark size={14}/> Bank</button>
-                                                    </div>
+                                                <div className="flex justify-end gap-3 pt-2">
+                                                    <button onClick={() => setActivePaymentRow(null)} className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-200 rounded-lg">Cancel</button>
+                                                    <button onClick={() => confirmPayment(idx)} className="px-6 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-lg flex items-center gap-2"><CheckCircle2 size={16}/> Confirm Payment</button>
                                                 </div>
                                             </div>
-
-                                            {item.paymentMode === 'BANK' && (
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <div><label className={labelClass}>Bank Name</label><input type="text" placeholder="e.g. HDFC" value={item.bankName || ''} onChange={(e) => updateScheduleRow(idx, 'bankName', e.target.value)} className={inputBase} /></div>
-                                                    <div><label className={labelClass}>Cheque / Ref No.</label><input type="text" placeholder="123456" value={item.refNumber || ''} onChange={(e) => updateScheduleRow(idx, 'refNumber', e.target.value)} className={inputBase} /></div>
-                                                </div>
-                                            )}
-
-                                            <div>
-                                                <label className={labelClass}>Remarks</label>
-                                                <div className="relative"><input type="text" placeholder="Optional notes..." value={item.remarks || ''} onChange={(e) => updateScheduleRow(idx, 'remarks', e.target.value)} className={`${inputBase} pl-8`} /><MessageSquare size={14} className="absolute left-3 top-3 text-slate-400" /></div>
-                                            </div>
-
-                                            <div className="flex justify-end gap-3 pt-2">
-                                                <button onClick={() => setActivePaymentRow(null)} className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-200 rounded-lg">Cancel</button>
-                                                <button onClick={() => confirmPayment(idx)} className="px-6 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-lg flex items-center gap-2"><CheckCircle2 size={16}/> Confirm Payment</button>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
+                                        )}
+                                    </div>
+                                );
+                            });
+                        })()}
                     </div>
 
-                    {/* LIVE TOTALS FOOTER */}
+                   {/* LIVE TOTALS FOOTER */}
                     <div className="bg-slate-50 border-t border-slate-200 p-4">
-                        <button onClick={handleAddInterim} className="w-full mb-4 border border-dashed border-slate-300 rounded-lg py-2 text-xs font-bold text-slate-500 hover:bg-white hover:text-orange-600 transition-all flex items-center justify-center gap-2"><PlusCircle size={14}/> Add Interim Payment</button>
-                        
                         <div className="grid grid-cols-3 gap-2 text-center">
                             <div className="bg-white rounded p-2 border border-slate-200"><div className="text-[10px] text-slate-400 uppercase font-bold">Total Deal</div><div className="text-sm font-bold text-slate-800">{formatCurrency(totalValue)}</div></div>
                             <div className="bg-emerald-50 rounded p-2 border border-emerald-100"><div className="text-[10px] text-emerald-600 uppercase font-bold">Total Paid</div><div className="text-sm font-bold text-emerald-700">{formatCurrency(totalPaid)}</div></div>
@@ -790,7 +762,6 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                         <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#6b7280' }}>Total Deal Value</div>
                                         <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#111827', marginTop: '4px' }}>{formatCurrency(totalValue)}</div>
                                     </div>
-                                    {/* Removed Down Payment Box */}
                                     <div style={{ textAlign: 'center', flex: 1, borderRight: '1px solid #e5e7eb' }}>
                                         <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#6b7280' }}>Total Paid</div>
                                         <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#059669', marginTop: '4px' }}>{formatCurrency(totalPaid)}</div>
@@ -811,7 +782,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                 )}
                             </div>
 
-                            {/* 4. PAYMENT SCHEDULE TABLE (WITH BALANCE) */}
+                            {/* 4. PAYMENT SCHEDULE TABLE (WITH SEPARATE COLUMNS) */}
                             <div>
                                 <div style={{ padding: '8px 0', borderBottom: '2px solid #e5e7eb', marginBottom: '10px', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', color: '#374151' }}>Payment Schedule</div>
                                 
@@ -820,21 +791,22 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                         <tr style={{ backgroundColor: '#374151', color: '#ffffff' }}>
                                             <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', borderRadius: '4px 0 0 4px' }}>Description</th>
                                            <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500' }}>Due Date</th>
-                                            <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Amount (Due / Paid)</th>
+                                            <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Due Amount</th>
+                                            <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Paid Amount</th>
                                             <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Balance</th>
-                                            <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', width: '30%', borderRadius: '0 4px 4px 0' }}>Ref / Remarks</th>
+                                            <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', width: '20%', borderRadius: '0 4px 4px 0' }}>Ref / Remarks</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {(() => {
-                                            let pdfBalance = totalValue;
+                                            let pdfRunningBalance = totalValue;
                                             return deal.schedule.map((item, idx) => {
-                                                if (item.isPaid) pdfBalance -= Number(item.paidAmount);
+                                                if (item.isPaid) pdfRunningBalance -= Number(item.paidAmount);
                                                 
                                                 return (
                                                     <tr key={item.id} style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f9fafb' }}>
                                                         <td style={{ padding: '10px 12px', color: '#111827' }}>{item.label}</td>
-                                                        <td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>
+                                                        <td style={{ padding: '10px 12px', color: '#4b5563' }}>
                                                             <div>{displayDate(item.dueDate)}</div>
                                                             {item.isPaid && item.paymentDate && (
                                                                 <div style={{ fontSize: '9px', color: '#059669', fontWeight: 'bold', marginTop: '2px' }}>
@@ -842,16 +814,12 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                                                 </div>
                                                             )}
                                                         </td>
-                                                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#111827' }}>
-                                                            <div>{formatCurrency(item.expectedAmount)}</div>
-                                                            {item.isPaid && (
-                                                                <div style={{ fontSize: '9px', color: '#059669', marginTop: '2px' }}>
-                                                                    Pd: {formatCurrency(Number(item.paidAmount))}
-                                                                </div>
-                                                            )}
+                                                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#111827' }}>{formatCurrency(item.expectedAmount)}</td>
+                                                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#059669' }}>
+                                                            {item.isPaid ? formatCurrency(Number(item.paidAmount)) : '-'}
                                                         </td>
                                                         <td style={{ padding: '10px 12px', textAlign: 'right', color: '#6b7280', fontFamily: 'monospace' }}>
-                                                            {item.isPaid ? formatCurrency(pdfBalance) : '-'}
+                                                            {item.isPaid ? formatCurrency(pdfRunningBalance) : '-'}
                                                         </td>
                                                         <td style={{ padding: '10px 12px', fontSize: '10px', color: '#4b5563' }}>
                                                             {item.isPaid ? (
@@ -872,11 +840,10 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                     <tfoot>
                                         <tr style={{ borderTop: '2px solid #374151' }}>
                                             <td colSpan={2} style={{ padding: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Total</td>
-                                            <td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold' }}>
-                                                <div>{formatCurrency(totalValue)}</div>
-                                                <div style={{ fontSize: '10px', color: '#059669', marginTop: '2px' }}>Pd: {formatCurrency(totalPaid)}</div>
-                                            </td>
-                                            <td colSpan={2}></td>
+                                            <td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(totalValue)}</td>
+                                            <td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold', color: '#059669' }}>{formatCurrency(totalPaid)}</td>
+                                            <td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{formatCurrency(balanceDue)}</td>
+                                            <td></td>
                                         </tr>
                                     </tfoot>
                                 </table>
