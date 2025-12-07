@@ -219,8 +219,9 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
                         const isExpanded = expandedPlotId === plot.id;
                         
                         const deal = plot.dealStructure;
-                        const hasActiveDeal = deal && deal.schedule && deal.schedule.length > 0;
-                        const isDealClosed = hasActiveDeal && deal.schedule.every((item: any) => item.isPaid);
+                        // Crash Proof Checks
+                        const hasActiveDeal = deal && Array.isArray(deal.schedule) && deal.schedule.length > 0;
+                        const isDealClosed = hasActiveDeal && deal.schedule?.every((item: any) => item.isPaid);
 
                         return (
                             <div key={plot.id} className="group transition-colors">
@@ -295,15 +296,20 @@ interface ManagerProps {
 
 const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData, projectIdentity, initialDeal, onSave }) => {
     
-    const [deal, setDeal] = useState<PlotDealState>(initialDeal || {
-        startDate: getLocalToday(),
-        dpAmount: '',
-        dpType: 'percent',
-        dpDurationVal: '', dpDurationUnit: 'Months',
-        totalDurationVal: '', totalDurationUnit: 'Months',
-        numInstallments: '',
-        agentName: '', agentPhone: '', agentCommission: '',
-        schedule: []
+    // Initial State Safety Merge
+    const [deal, setDeal] = useState<PlotDealState>({
+        startDate: initialDeal?.startDate || getLocalToday(),
+        dpAmount: initialDeal?.dpAmount || '',
+        dpType: initialDeal?.dpType || 'percent',
+        dpDurationVal: initialDeal?.dpDurationVal || '', 
+        dpDurationUnit: initialDeal?.dpDurationUnit || 'Months',
+        totalDurationVal: initialDeal?.totalDurationVal || '', 
+        totalDurationUnit: initialDeal?.totalDurationUnit || 'Months',
+        numInstallments: initialDeal?.numInstallments || '',
+        agentName: initialDeal?.agentName || '', 
+        agentPhone: initialDeal?.agentPhone || '', 
+        agentCommission: initialDeal?.agentCommission || '',
+        schedule: Array.isArray(initialDeal?.schedule) ? initialDeal!.schedule : []
     });
 
     const [activePaymentRow, setActivePaymentRow] = useState<number | null>(null);
@@ -334,18 +340,14 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
         if (deal.totalDurationUnit === 'Days') endDate.setDate(endDate.getDate() + totalNum);
         else endDate.setMonth(endDate.getMonth() + totalNum);
 
-        const timeSpan = endDate.getTime() - dpDate.getTime();
-        const intervalMs = nInst > 0 ? Math.max(0, timeSpan) / Math.ceil(nInst) : 0;
-
-        const instAmount = nInst > 0 ? Math.round(balance / nInst) : 0; 
         const newSchedule: PaymentInstallment[] = [];
 
-        // 1. SPOT DEAL CHECK (No DP, No Installments -> Full Payment)
+        // 1. SPOT DEAL (No DP, No Installs)
         if (dpVal === 0 && nInst === 0) {
              newSchedule.push({
                 id: 1, 
                 label: 'Full Payment', 
-                dueDate: start.toISOString().split('T')[0], // Due Immediately
+                dueDate: start.toISOString().split('T')[0], 
                 expectedAmount: totalValue, 
                 paidAmount: '', 
                 isPaid: false
@@ -354,8 +356,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
             return;
         }
 
-        // 2. STANDARD DEAL
-        // Row 1: Down Payment
+        // 2. STANDARD DEAL - Row 1: Down Payment
         newSchedule.push({
             id: 1, label: 'Down Payment', dueDate: dpDate.toISOString().split('T')[0],
             expectedAmount: dpVal, paidAmount: '', isPaid: false
@@ -363,6 +364,10 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
 
         // Row 2+: Installments
         if (nInst > 0) {
+            const timeSpan = endDate.getTime() - dpDate.getTime();
+            const intervalMs = Math.max(0, timeSpan) / Math.ceil(nInst);
+            const instAmount = Math.round(balance / nInst); 
+
             const count = Math.ceil(nInst);
             let runningBalance = balance;
 
@@ -410,47 +415,83 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
     const handleDateChange = (index: number, val: string) => {
         const newSchedule = [...deal.schedule];
         newSchedule[index] = { ...newSchedule[index], dueDate: val };
-        
-        // Auto-sort when date changes so user sees it move to correct position
+        // Auto-sort when date changes
         const sorted = sortScheduleByDate(newSchedule);
         setDeal({ ...deal, schedule: sorted });
     };
 
+    // --- SMART LOGIC: SPLIT & SPILLOVER ---
     const confirmPayment = (index: number) => {
-        const newSchedule = [...deal.schedule];
+        let newSchedule = [...deal.schedule];
         const current = newSchedule[index];
         
-        current.isPaid = true;
+        // 1. Update Current Row
         const actualPaid = current.paidAmount === '' ? current.expectedAmount : Number(current.paidAmount);
-        current.paidAmount = actualPaid; 
-        // Fix: Use the selected date, or default to today if user didn't pick one
-        current.paymentDate = current.paymentDate || getLocalToday();
-
-        const diff = current.expectedAmount - actualPaid;
+        const originalExpected = current.expectedAmount;
         
-        // FIX: For Interim, update Expected to match Actual so it displays nicely
-        if (current.isInterim) {
-            current.expectedAmount = actualPaid;
-        }
+        current.isPaid = true;
+        current.paidAmount = actualPaid; 
+        current.paymentDate = current.paymentDate || getLocalToday(); // Use existing or today
 
-        // Adjust Next Unpaid Row
-        let adjusted = false;
-        for (let i = index + 1; i < newSchedule.length; i++) {
-            if (!newSchedule[i].isPaid) {
-                newSchedule[i].expectedAmount += diff;
-                adjusted = true;
-                break; 
+        const diff = originalExpected - actualPaid; 
+
+        // 2. Logic Branching
+        if (diff > 0) {
+            // Case A: Partial Payment (SPLIT)
+            // Current becomes the paid portion
+            current.expectedAmount = actualPaid; 
+            
+            // Create Balance Row
+            const balRow: PaymentInstallment = {
+                ...current,
+                id: Date.now(),
+                label: `${current.label} (Bal)`,
+                expectedAmount: diff,
+                paidAmount: '',
+                isPaid: false,
+                isInterim: false,
+                paymentDate: undefined,
+                paymentMode: undefined,
+                bankName: undefined,
+                refNumber: undefined,
+                remarks: undefined
+            };
+            // Insert after current
+            newSchedule.splice(index + 1, 0, balRow);
+
+        } else if (diff < 0) {
+            // Case B: Overpayment / Interim (SPILLOVER)
+            // Current expected matches paid so it looks clean
+            current.expectedAmount = actualPaid; 
+            
+            let excess = Math.abs(diff); // Amount to deduct from future
+            
+            for (let i = index + 1; i < newSchedule.length; i++) {
+                if (newSchedule[i].isPaid) continue; // Skip already paid rows
+                
+                if (newSchedule[i].expectedAmount >= excess) {
+                    newSchedule[i].expectedAmount -= excess;
+                    excess = 0;
+                    break;
+                } else {
+                    // This row is smaller than excess, wipe it out and carry over
+                    excess -= newSchedule[i].expectedAmount;
+                    newSchedule[i].expectedAmount = 0; 
+                }
             }
         }
 
-        const sorted = sortScheduleByDate(newSchedule);
-        setDeal({ ...deal, schedule: sorted });
+        // 3. Final Sort & Save
+        // We don't sort here to keep the Split row immediately after the parent
+        setDeal({ ...deal, schedule: newSchedule });
         setActivePaymentRow(null);
     };
 
     const undoPayment = (index: number) => {
         const newSchedule = [...deal.schedule];
         newSchedule[index].isPaid = false;
+        // Ideally we revert splits/spillovers but that's complex history tracking.
+        // Simple undo just unchecks. User can manually edit amounts if needed.
         setDeal({ ...deal, schedule: newSchedule });
     };
 
@@ -481,6 +522,9 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
            element.style.display = 'none'; 
         });
     };
+
+    // --- RUNNING BALANCE CALCULATION FOR UI ---
+    let runningBalanceUI = totalValue;
 
     // Calculate Footer Totals
     const totalPaid = deal.schedule.reduce((sum, item) => sum + (item.isPaid ? Number(item.paidAmount) : 0), 0);
@@ -530,9 +574,14 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                     </div>
 
                     <div className="divide-y divide-slate-100">
-                        {deal.schedule.map((item, idx) => {
+                        {(deal.schedule || []).map((item, idx) => {
                             const isEditing = activePaymentRow === idx;
                             const isPaid = item.isPaid;
+                            
+                            // Calc Balance for this row
+                            if (item.isPaid) {
+                                runningBalanceUI -= Number(item.paidAmount);
+                            }
 
                             return (
                                 <div key={item.id} className={`transition-all ${isPaid ? 'bg-emerald-50/50' : ''}`}>
@@ -557,7 +606,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                                     disabled={isPaid} // Lock due date if paid
                                                     onChange={(e) => handleDateChange(idx, e.target.value)} 
                                                     onClick={(e) => {try{(e.target as HTMLInputElement).showPicker()}catch(err){}}} 
-                                                    className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer disabled:cursor-not-allowed" 
+                                                    className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer disabled:cursor-not-allowed [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" 
                                                 />
                                                 <div className="w-full h-full border rounded-lg flex items-center px-3 gap-2 transition-all bg-white border-slate-200">
                                                     <Calendar size={14} className="text-slate-400" />
@@ -571,12 +620,19 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                             )}
                                         </div>
 
-                                       <div className="w-full md:w-32 flex justify-between md:block text-right">
+                                       {/* Amounts + Running Balance */}
+                                       <div className="w-full md:w-48 flex justify-between md:block text-right">
                                             <span className="md:hidden text-xs font-bold text-slate-400">Due:</span>
                                             <div className="font-bold text-slate-600">{formatCurrency(item.expectedAmount)}</div>
                                             {item.isPaid && (
                                                 <div className="text-[10px] font-bold text-emerald-600 mt-1">
                                                     Pd: {formatCurrency(Number(item.paidAmount))}
+                                                </div>
+                                            )}
+                                            {/* BALANCE DISPLAY */}
+                                            {isPaid && (
+                                                <div className="text-[10px] font-mono text-slate-400 mt-1 border-t border-slate-200 pt-1">
+                                                    Bal: {formatCurrency(runningBalanceUI)}
                                                 </div>
                                             )}
                                         </div>
@@ -593,25 +649,28 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                    {/* INLINE PAYMENT FORM */}
                                     {isEditing && !isPaid && (
                                         <div className="bg-slate-50 border-t border-slate-200 p-4 grid gap-4 animate-in slide-in-from-top-2">
-                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                            {/* GRID ADJUSTMENT FOR INTERIM (Hide Date Picker) */}
+                                            <div className={`grid grid-cols-1 ${!item.isInterim ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-4`}>
                                                 
-                                                {/* 1. Payment Date Picker */}
-                                                <div>
-                                                    <label className={labelClass}>Payment Date</label>
-                                                    <div className="relative w-full h-[42px] group">
-                                                        <input 
-                                                            type="date" 
-                                                            value={item.paymentDate || getLocalToday()} 
-                                                            onChange={(e) => updateScheduleRow(idx, 'paymentDate', e.target.value)} 
-                                                            onClick={(e) => {try{(e.target as HTMLInputElement).showPicker()}catch(err){}}} 
-                                                            className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" 
-                                                        />
-                                                        <div className="w-full h-full bg-white border border-slate-300 rounded-lg flex items-center px-3 gap-2 transition-all">
-                                                            <Calendar size={16} className="text-slate-400" />
-                                                            <span className="text-sm font-bold text-slate-800">{displayDate(item.paymentDate || getLocalToday())}</span>
+                                                {/* 1. Payment Date Picker (Only for Regular) */}
+                                                {!item.isInterim && (
+                                                    <div>
+                                                        <label className={labelClass}>Payment Date</label>
+                                                        <div className="relative w-full h-[42px] group">
+                                                            <input 
+                                                                type="date" 
+                                                                value={item.paymentDate || getLocalToday()} 
+                                                                onChange={(e) => updateScheduleRow(idx, 'paymentDate', e.target.value)} 
+                                                                onClick={(e) => {try{(e.target as HTMLInputElement).showPicker()}catch(err){}}} 
+                                                                className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" 
+                                                            />
+                                                            <div className="w-full h-full bg-white border border-slate-300 rounded-lg flex items-center px-3 gap-2 transition-all">
+                                                                <Calendar size={16} className="text-slate-400" />
+                                                                <span className="text-sm font-bold text-slate-800">{displayDate(item.paymentDate || getLocalToday())}</span>
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                </div>
+                                                )}
 
                                                 {/* 2. Amount */}
                                                 <div>
@@ -722,7 +781,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                 </div>
                             </div>
 
-                            {/* 3. FINANCIAL TERMS */}
+                            {/* 3. FINANCIAL TERMS (UPDATED: NO DP) */}
                             <div style={{ marginBottom: '30px' }}>
                                 <div style={{ padding: '8px 0', borderBottom: '2px solid #e5e7eb', marginBottom: '15px', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', color: '#374151' }}>Financial Terms</div>
                                 
@@ -731,11 +790,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                         <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#6b7280' }}>Total Deal Value</div>
                                         <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#111827', marginTop: '4px' }}>{formatCurrency(totalValue)}</div>
                                     </div>
-                                    <div style={{ textAlign: 'center', flex: 1, borderRight: '1px solid #e5e7eb' }}>
-                                        <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#6b7280' }}>Down Payment</div>
-                                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#111827', marginTop: '4px' }}>{formatCurrency(Number(deal.dpAmount))}</div>
-                                        <div style={{ fontSize: '9px', color: '#9ca3af' }}>{deal.dpDurationVal} {deal.dpDurationUnit} window</div>
-                                    </div>
+                                    {/* Removed Down Payment Box */}
                                     <div style={{ textAlign: 'center', flex: 1, borderRight: '1px solid #e5e7eb' }}>
                                         <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#6b7280' }}>Total Paid</div>
                                         <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#059669', marginTop: '4px' }}>{formatCurrency(totalPaid)}</div>
@@ -756,7 +811,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                 )}
                             </div>
 
-                            {/* 4. PAYMENT SCHEDULE TABLE */}
+                            {/* 4. PAYMENT SCHEDULE TABLE (WITH BALANCE) */}
                             <div>
                                 <div style={{ padding: '8px 0', borderBottom: '2px solid #e5e7eb', marginBottom: '10px', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', color: '#374151' }}>Payment Schedule</div>
                                 
@@ -766,42 +821,53 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                             <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', borderRadius: '4px 0 0 4px' }}>Description</th>
                                            <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500' }}>Due Date</th>
                                             <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Amount (Due / Paid)</th>
-                                            <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', width: '35%', borderRadius: '0 4px 4px 0' }}>Ref / Remarks</th>
+                                            <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Balance</th>
+                                            <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', width: '30%', borderRadius: '0 4px 4px 0' }}>Ref / Remarks</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {deal.schedule.map((item, idx) => (
-                                            <tr key={item.id} style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f9fafb' }}>
-                                                <td style={{ padding: '10px 12px', color: '#111827' }}>{item.label}</td>
-                                                <td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>
-                                                    <div>{displayDate(item.dueDate)}</div>
-                                                    {item.isPaid && item.paymentDate && (
-                                                        <div style={{ fontSize: '9px', color: '#059669', fontWeight: 'bold', marginTop: '2px' }}>
-                                                            Pd: {displayDate(item.paymentDate)}
-                                                        </div>
-                                                    )}
-                                                </td>
-                                               <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#111827' }}>
-                                                    <div>{formatCurrency(item.expectedAmount)}</div>
-                                                    {item.isPaid && (
-                                                        <div style={{ fontSize: '9px', color: '#059669', marginTop: '2px' }}>
-                                                            Pd: {formatCurrency(Number(item.paidAmount))}
-                                                        </div>
-                                                    )}
-                                                </td>
-                                                <td style={{ padding: '10px 12px', fontSize: '10px', color: '#4b5563' }}>
-                                                    {item.isPaid ? (
-                                                        <div style={{ lineHeight: '1.4' }}>
-                                                            <div style={{ fontWeight: 'bold' }}>{item.paymentMode || 'CASH'}</div>
-                                                            {item.paymentMode === 'BANK' && <div>{item.bankName} #{item.refNumber}</div>}
-                                                            {item.remarks && <div style={{ fontStyle: 'italic', color: '#6b7280' }}>"{item.remarks}"</div>}
-                                                        </div>
-                                                    ) : (
-                                                        <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>Pending</span>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        ))}
+                                        {(() => {
+                                            let pdfBalance = totalValue;
+                                            return deal.schedule.map((item, idx) => {
+                                                if (item.isPaid) pdfBalance -= Number(item.paidAmount);
+                                                
+                                                return (
+                                                    <tr key={item.id} style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f9fafb' }}>
+                                                        <td style={{ padding: '10px 12px', color: '#111827' }}>{item.label}</td>
+                                                        <td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>
+                                                            <div>{displayDate(item.dueDate)}</div>
+                                                            {item.isPaid && item.paymentDate && (
+                                                                <div style={{ fontSize: '9px', color: '#059669', fontWeight: 'bold', marginTop: '2px' }}>
+                                                                    Pd: {displayDate(item.paymentDate)}
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#111827' }}>
+                                                            <div>{formatCurrency(item.expectedAmount)}</div>
+                                                            {item.isPaid && (
+                                                                <div style={{ fontSize: '9px', color: '#059669', marginTop: '2px' }}>
+                                                                    Pd: {formatCurrency(Number(item.paidAmount))}
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                        <td style={{ padding: '10px 12px', textAlign: 'right', color: '#6b7280', fontFamily: 'monospace' }}>
+                                                            {item.isPaid ? formatCurrency(pdfBalance) : '-'}
+                                                        </td>
+                                                        <td style={{ padding: '10px 12px', fontSize: '10px', color: '#4b5563' }}>
+                                                            {item.isPaid ? (
+                                                                <div style={{ lineHeight: '1.4' }}>
+                                                                    <div style={{ fontWeight: 'bold' }}>{item.paymentMode || 'CASH'}</div>
+                                                                    {item.paymentMode === 'BANK' && <div>{item.bankName} #{item.refNumber}</div>}
+                                                                    {item.remarks && <div style={{ fontStyle: 'italic', color: '#6b7280' }}>"{item.remarks}"</div>}
+                                                                </div>
+                                                            ) : (
+                                                                <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>Pending</span>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            });
+                                        })()}
                                     </tbody>
                                     <tfoot>
                                         <tr style={{ borderTop: '2px solid #374151' }}>
@@ -810,7 +876,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                                 <div>{formatCurrency(totalValue)}</div>
                                                 <div style={{ fontSize: '10px', color: '#059669', marginTop: '2px' }}>Pd: {formatCurrency(totalPaid)}</div>
                                             </td>
-                                            <td></td>
+                                            <td colSpan={2}></td>
                                         </tr>
                                     </tfoot>
                                 </table>
