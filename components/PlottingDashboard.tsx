@@ -562,8 +562,19 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                                           type="text" 
                                           inputMode="decimal"
                                           placeholder="₹ Rate" 
-                                          value={formatInputNumber(plot.customLandRate)}
-                                          onChange={(e) => handlePlotChange(plot.id, 'customLandRate', parseInputNumber(e.target.value))}
+                                          value={
+                                              // Fix: Allow decimal typing by checking for trailing dot or .00
+                                              String(plot.customLandRate).match(/[.]$|[.][0]+$/) 
+                                                  ? plot.customLandRate 
+                                                  : formatInputNumber(plot.customLandRate)
+                                          }
+                                          onChange={(e) => {
+                                              // Fix: Manual regex to allow decimal points while typing
+                                              const raw = e.target.value.replace(/[^0-9.]/g, '');
+                                              const parts = raw.split('.');
+                                              const val = parts[0] + (parts.length > 1 ? '.' + parts[1] : '');
+                                              handlePlotChange(plot.id, 'customLandRate', val);
+                                          }}
                                           className={`${inputClass} text-right font-medium`}
                                        />
                                     </td>
