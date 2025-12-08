@@ -106,7 +106,10 @@ const App: React.FC = () => {
     // LOAD THE PLOTS HERE:
     setLoadedPlottingData(project.plotting_data); 
     
-   setCurrentView('plot-registry');
+    setCurrentView('loading');
+    setTimeout(() => {
+        setCurrentView('plot-registry');
+    }, 300);
   };
 
   return (

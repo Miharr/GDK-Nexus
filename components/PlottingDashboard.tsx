@@ -10,7 +10,8 @@ import {
   AlertCircle,
   Users,
   Calendar,
-  Search // 1. Added Search Icon
+  Search,
+  LayoutGrid
 } from 'lucide-react';
 import { Card } from './Card';
 import { supabase } from '../supabaseClient';
@@ -41,7 +42,7 @@ const CONVERSION_RATES = {
 export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, projectData, existingPlottingData, projectId }) => {
   
   // --- STATE ---
-  const [landRate, setLandRate] = useState<number | ''>('');
+  const [landRate, setLandRate] = useState<number | ''>(''); 
   const [devRate, setDevRate] = useState<number | ''>('');
   
   const [devExpenses, setDevExpenses] = useState<PlottingDevExpense[]>([
@@ -51,7 +52,8 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
   ]);
 
   const [plotSales, setPlotSales] = useState<any[]>([]);
-  const [searchQuery, setSearchQuery] = useState(''); // 2. Search State
+  const [totalPlotsConfig, setTotalPlotsConfig] = useState<number>(30); // Default 30 plots
+  const [searchQuery, setSearchQuery] = useState('');
 
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [areaInVaar, setAreaInVaar] = useState<number>(0);
@@ -88,11 +90,33 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
       setDevRate(existingPlottingData.devRate || '');
       setDevExpenses(existingPlottingData.developmentExpenses || []);
       setPlotSales(existingPlottingData.plotSales || []);
+      // Load total plots config or default to 30
+      if(existingPlottingData.totalPlots) setTotalPlotsConfig(existingPlottingData.totalPlots);
     }
   }, [existingPlottingData, projectData]);
 
+  // --- WEIGHTED AVERAGE LAND RATE CALCULATION ---
+  useEffect(() => {
+      const totalLandValue = plotSales.reduce((sum, p) => {
+          const pRate = Number(p.customLandRate) || 0;
+          const pArea = Number(p.areaVaar) || 0;
+          return sum + (pRate * pArea);
+      }, 0);
+
+      const totalPlotArea = plotSales.reduce((sum, p) => sum + (Number(p.areaVaar) || 0), 0);
+
+      // Fix: Ensure we don't set NaN if area is 0
+      if (totalPlotArea > 0) {
+          const weightedAvg = totalLandValue / totalPlotArea;
+          setLandRate(parseFloat(weightedAvg.toFixed(2)));
+      } else {
+          setLandRate(0);
+      }
+  }, [plotSales]);
+
+
   // --- CALCULATIONS ---
-  const totalLandAmount = (Number(landRate) || 0) * areaInVaar;
+  const totalLandAmount = (Number(landRate) || 0) * areaInVaar; 
   const totalDevAmount = (Number(devRate) || 0) * areaInVaar;
   const grandTotalCost = totalLandAmount + totalDevAmount;
 
@@ -103,13 +127,13 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
   const isOverLimit = remainingVaar < 0;
   const utilizationPercent = areaInVaar > 0 ? (totalAllocatedVaar / areaInVaar) * 100 : 0;
 
-  // 3. Search Filter Logic
+  // Search Filter
   const filteredPlots = plotSales.filter(plot => {
     const q = searchQuery.toLowerCase();
     return (
-      plot.customerName?.toLowerCase().includes(q) || 
-      plot.plotNumber?.toString().includes(q) ||
-      plot.phoneNumber?.includes(q)
+      (plot.customerName?.toLowerCase().includes(q) || '') || 
+      (plot.plotNumber?.toString().includes(q) || '') ||
+      (plot.phoneNumber?.includes(q) || '')
     );
   });
 
@@ -127,21 +151,17 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
   };
 
   const handleAddPlot = () => {
-    // Basic auto-increment logic (Find max number + 1 to avoid duplicates on deletion)
-    const maxNum = plotSales.reduce((max, p) => (p.plotNumber > max ? p.plotNumber : max), 0);
-    
     setPlotSales([...plotSales, {
       id: crypto.randomUUID(),
-      plotNumber: maxNum + 1,
+      plotNumber: '', 
       customerName: '',
       phoneNumber: '',
       bookingDate: new Date().toISOString().split('T')[0],
       dimLengthFt: '',
       dimWidthFt: '',
-      areaVaar: 0
+      areaVaar: 0,
+      customLandRate: '' 
     }]);
-    
-    // Clear search so the new item is visible immediately
     setSearchQuery('');
   };
 
@@ -179,9 +199,9 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
       devRate,
       developmentExpenses: devExpenses,
       plotSales: plotSales,
+      totalPlots: totalPlotsConfig, // Save grid config
       
       deductionPercent: existingPlottingData?.deductionPercent || 0,
-      totalPlots: existingPlottingData?.totalPlots || 0,
       plotGroups: existingPlottingData?.plotGroups || [],
       plotsStatus: existingPlottingData?.plotsStatus || [],
       expectedSalesRate: existingPlottingData?.expectedSalesRate || '',
@@ -246,9 +266,9 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
 
       <main className="max-w-7xl mx-auto px-4 md:px-8 mt-8 grid grid-cols-1 md:grid-cols-2 gap-6 pb-20">
         
-        {/* 1. Project Cost */}
+        {/* 1. Project Sales */}
         <div className="md:col-span-1">
-          <Card title="Project Cost" icon={<IndianRupee size={20} />} className="h-full">
+          <Card title="Project Sales" icon={<IndianRupee size={20} />} className="h-full">
             <div className="space-y-5">
                <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200">
                   <span className="text-xs font-bold text-slate-500 uppercase">Plotted Area</span>
@@ -260,18 +280,17 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
 
                <div className="grid grid-cols-12 gap-2 items-end">
                   <div className="col-span-5">
-                     <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Land Rate</label>
+                     <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Avg Land Rate</label>
                      <input 
                        type="text" 
-                       inputMode="decimal"
+                       readOnly
                        value={formatInputNumber(landRate)} 
-                       onChange={e => setLandRate(parseInputNumber(e.target.value))} 
-                       className={inputClass} 
-                       placeholder="₹ / Vaar" 
+                       className={`${inputClass} bg-slate-100 text-slate-600 font-bold`} 
+                       placeholder="Calculated" 
                      />
                   </div>
                   <div className="col-span-7">
-                     <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block text-right">Total Plot Amount</label>
+                     <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block text-right">Total Plot Sales</label>
                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-right font-mono font-bold text-slate-700 text-sm">
                         {formatCurrency(totalLandAmount)}
                      </div>
@@ -300,7 +319,7 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
 
                <div className="mt-2 bg-slate-800 text-white p-4 rounded-xl shadow-lg shadow-slate-200">
                   <div className="flex justify-between items-center">
-                     <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Total Project Cost</span>
+                     <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Total Sales Est.</span>
                      <span className="text-xl font-bold font-mono text-safety-500">{formatCurrency(grandTotalCost)}</span>
                   </div>
                </div>
@@ -354,42 +373,58 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
            <Card title="Plot Sales" icon={<Users size={20} />}>
               <div className="space-y-4">
                  
-                 {/* Land Utilization Tracker */}
-                 <div className={`p-4 rounded-xl border ${isOverLimit ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
-                    <div className="flex justify-between items-end mb-2">
-                       <div>
-                          <div className="text-xs font-bold uppercase text-slate-400 mb-1">Land Utilization</div>
-                          <div className="flex items-baseline gap-2">
-                             <span className={`text-xl font-bold ${isOverLimit ? 'text-red-600' : 'text-slate-800'}`}>
-                                {formatInputNumber(totalAllocatedVaar)}
-                             </span>
-                             <span className="text-sm text-slate-400">/ {formatInputNumber(areaInVaar)} Vaar</span>
-                          </div>
-                       </div>
-                       <div className="text-right">
-                          <div className="text-xs font-bold uppercase text-slate-400 mb-1">Remaining</div>
-                          <div className={`text-lg font-bold ${isOverLimit ? 'text-red-600' : 'text-emerald-600'}`}>
-                             {formatInputNumber(remainingVaar)} <span className="text-xs font-medium">Vaar</span>
-                          </div>
-                       </div>
+                 {/* INVENTORY GRID (DYNAMIC) */}
+                 <div className="mb-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
+                    <div className="flex justify-between items-center mb-4">
+                        <div className="flex items-center gap-2">
+                            <LayoutGrid size={16} className="text-safety-500" />
+                            <span className="text-xs font-bold text-slate-600 uppercase">Inventory Status Grid</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase">Total Plots:</span>
+                            <input 
+                                type="number" 
+                                value={totalPlotsConfig} 
+                                onChange={(e) => setTotalPlotsConfig(Number(e.target.value))} 
+                                className="w-16 h-8 text-center text-sm font-bold border border-slate-300 rounded bg-white"
+                            />
+                        </div>
                     </div>
                     
-                    <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
-                       <div 
-                          className={`h-full transition-all duration-500 ${isOverLimit ? 'bg-red-500' : 'bg-emerald-500'}`}
-                          style={{ width: `${Math.min(utilizationPercent, 100)}%` }}
-                       />
+                    <div className="grid grid-cols-5 md:grid-cols-10 gap-2">
+                        {Array.from({ length: totalPlotsConfig }).map((_, i) => {
+                            const num = i + 1;
+                            // Find matching plot by Manual Number (String comparison)
+                            const matchedPlot = plotSales.find(p => String(p.plotNumber) === String(num));
+                            
+                            let statusColor = "bg-white border-2 border-slate-200 text-slate-300"; // Default Empty
+                            if (matchedPlot) {
+                                // Default to Booked (Orange)
+                                statusColor = "bg-orange-100 border-2 border-orange-400 text-orange-700 font-bold";
+                                
+                                // Check if Fully Sold (Green)
+                                const deal = matchedPlot.dealStructure;
+                                if (deal && deal.schedule && deal.schedule.length > 0) {
+                                    const isFullyPaid = deal.schedule.every((s: any) => s.isPaid);
+                                    if (isFullyPaid) statusColor = "bg-emerald-100 border-2 border-emerald-500 text-emerald-700 font-bold";
+                                }
+                            }
+
+                            return (
+                                <div key={i} className={`${statusColor} rounded-md h-10 flex items-center justify-center text-xs transition-all shadow-sm`}>
+                                    {num}
+                                </div>
+                            )
+                        })}
                     </div>
-                    
-                    {isOverLimit && (
-                       <div className="mt-2 flex items-center gap-2 text-xs font-bold text-red-600">
-                          <AlertCircle size={14} />
-                          Warning: You have allocated more land than available!
-                       </div>
-                    )}
+                    <div className="flex gap-4 mt-3 justify-end text-[10px] uppercase font-bold text-slate-400">
+                        <span className="flex items-center gap-1"><div className="w-3 h-3 bg-white border-2 border-slate-200 rounded"></div> Available</span>
+                        <span className="flex items-center gap-1"><div className="w-3 h-3 bg-orange-100 border-2 border-orange-400 rounded"></div> Booked</span>
+                        <span className="flex items-center gap-1"><div className="w-3 h-3 bg-emerald-100 border-2 border-emerald-500 rounded"></div> Sold</span>
+                    </div>
                  </div>
 
-                 {/* 4. NEW SEARCH BAR */}
+                 {/* SEARCH BAR */}
                  <div className="relative group">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <Search size={16} className="text-slate-400 group-focus-within:text-safety-500 transition-colors" />
@@ -407,28 +442,36 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                     <table className="w-full text-sm text-left border-collapse min-w-[900px]">
                        <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-200">
                           <tr>
-                             <th className="px-3 py-3 w-12 text-center">#</th>
+                             <th className="px-3 py-3 w-16 text-center">Plot #</th>
                              <th className="px-3 py-3">Customer Info</th>
                              <th className="px-3 py-3 w-24 text-center">Date</th>
-                             <th className="px-3 py-3 w-48 text-center">Dimensions (ft)</th>
-                             <th className="px-3 py-3 w-28 text-right">Area (Vaar)</th>
-                             <th className="px-3 py-3 w-40 text-right">Pricing</th>
+                             <th className="px-3 py-3 w-40 text-center">Dimensions (ft)</th>
+                             <th className="px-3 py-3 w-24 text-right">Area (Vaar)</th>
+                             <th className="px-3 py-3 w-32 text-right">Rate / Vaar</th>
+                             <th className="px-3 py-3 w-36 text-right">Total Price</th>
                              <th className="px-3 py-3 w-10"></th>
                           </tr>
                        </thead>
                        <tbody className="divide-y divide-slate-100 bg-white">
-                          {/* 5. Map over FILTERED plots */}
                           {filteredPlots.length === 0 ? (
                              <tr>
-                                <td colSpan={7} className="px-3 py-8 text-center text-slate-400 italic">
+                                <td colSpan={8} className="px-3 py-8 text-center text-slate-400 italic">
                                    {plotSales.length === 0 ? "No plots added yet." : "No matching plots found."}
                                 </td>
                              </tr>
                           ) : (
                               filteredPlots.map((plot, idx) => (
                                  <tr key={plot.id} className="hover:bg-slate-50 transition-colors group">
-                                    {/* Display actual Plot Number, not Table Index */}
-                                    <td className="px-3 py-2 text-center font-bold text-slate-400">{plot.plotNumber}</td>
+                                    {/* Manual Plot Number Input */}
+                                    <td className="px-3 py-2">
+                                        <input 
+                                          type="text" 
+                                          placeholder="#"
+                                          value={plot.plotNumber}
+                                          onChange={(e) => handlePlotChange(plot.id, 'plotNumber', e.target.value)}
+                                          className={`${inputClass} text-center font-bold`}
+                                       />
+                                    </td>
                                     
                                     <td className="px-3 py-2">
                                        <input 
@@ -448,7 +491,7 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                                        />
                                     </td>
                                     
-                                    {/* FULL CLICKABLE Date Picker (Preserved) */}
+                                    {/* FULL CLICKABLE Date Picker */}
                                     <td className="px-3 py-2">
                                        <div className="relative w-full h-9 group/date">
                                           <input 
@@ -495,7 +538,7 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                                              placeholder="L" 
                                              value={plot.dimLengthFt}
                                              onChange={(e) => handlePlotChange(plot.id, 'dimLengthFt', e.target.value)}
-                                             className={`${inputClass} w-16 text-center`}
+                                             className={`${inputClass} w-14 text-center`}
                                           />
                                           <span className="text-slate-300">x</span>
                                           <input 
@@ -504,7 +547,7 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                                              placeholder="W" 
                                              value={plot.dimWidthFt}
                                              onChange={(e) => handlePlotChange(plot.id, 'dimWidthFt', e.target.value)}
-                                             className={`${inputClass} w-16 text-center`}
+                                             className={`${inputClass} w-14 text-center`}
                                           />
                                        </div>
                                     </td>
@@ -512,12 +555,25 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                                        <div className="font-bold text-slate-800 text-lg">{plot.areaVaar}</div>
                                        <div className="text-[9px] text-slate-400 uppercase font-bold">Vaar</div>
                                     </td>
+                                    
+                                    {/* Per-Plot Land Rate Input */}
+                                    <td className="px-3 py-2">
+                                        <input 
+                                          type="text" 
+                                          inputMode="decimal"
+                                          placeholder="₹ Rate" 
+                                          value={formatInputNumber(plot.customLandRate)}
+                                          onChange={(e) => handlePlotChange(plot.id, 'customLandRate', parseInputNumber(e.target.value))}
+                                          className={`${inputClass} text-right font-medium`}
+                                       />
+                                    </td>
+
                                     <td className="px-3 py-2 text-right">
                                        <div className="flex flex-col gap-1 text-xs">
                                           <div className="flex justify-between gap-2">
                                              <span className="text-slate-400">Land:</span>
                                              <span className="font-medium text-slate-700">
-                                                {formatCurrency(plot.areaVaar * (Number(landRate) || 0))}
+                                                {formatCurrency(plot.areaVaar * (Number(plot.customLandRate) || 0))}
                                              </span>
                                           </div>
                                           <div className="flex justify-between gap-2">
@@ -529,7 +585,7 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                                           <div className="border-t border-slate-100 mt-1 pt-1 flex justify-between gap-2 font-bold text-safety-600">
                                              <span>Total:</span>
                                              <span>
-                                                {formatCurrency(plot.areaVaar * ((Number(landRate) || 0) + (Number(devRate) || 0)))}
+                                                {formatCurrency(plot.areaVaar * ((Number(plot.customLandRate) || 0) + (Number(devRate) || 0)))}
                                              </span>
                                           </div>
                                        </div>

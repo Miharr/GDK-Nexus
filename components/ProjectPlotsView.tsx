@@ -124,6 +124,9 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
   const devRate = Number(data.devRate) || 0;
 
   const filteredPlots = plots.filter((plot: any) => {
+    // 1. Filter: Valid plots only
+    if (!plot.customerName || !plot.plotNumber) return false;
+
     const q = searchTerm.toLowerCase();
     return (
       (plot.customerName?.toLowerCase().includes(q) || '') ||
@@ -200,7 +203,7 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
              {filteredPlots.length === 0 ? (
                 <div className="p-8 text-center text-slate-400 italic">
-                   {plots.length === 0 ? "No plots found." : "No matching results."}
+                   {plots.length === 0 ? "No active sales found." : "No matching results."}
                 </div>
              ) : (
                 <div className="divide-y divide-slate-100">
@@ -215,9 +218,11 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
 
                    {filteredPlots.map((plot: any) => {
                         const area = Number(plot.areaVaar) || 0;
-                        const totalValue = area * (landRate + devRate);
-                        const isExpanded = expandedPlotId === plot.id;
+                        // FIX: Fallback to global landRate if custom is 0
+                        const pLandRate = Number(plot.customLandRate) || landRate;
+                        const totalValue = area * (pLandRate + devRate);
                         
+                        const isExpanded = expandedPlotId === plot.id;
                         const deal = plot.dealStructure;
                         const hasActiveDeal = deal && Array.isArray(deal.schedule) && deal.schedule.length > 0;
                         const isDealClosed = hasActiveDeal && deal.schedule?.every((item: any) => item.isPaid);
@@ -381,6 +386,16 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                     expectedAmount: amount, paidAmount: '', isPaid: false
                 });
             }
+        } else if (balance > 0) {
+            // CASE: Has DP but 0 Installments -> Remainder is Final Payment at end date
+            newSchedule.push({
+                id: 2, 
+                label: 'Final Payment', 
+                dueDate: endDate.toISOString().split('T')[0],
+                expectedAmount: balance, 
+                paidAmount: '', 
+                isPaid: false
+            });
         }
         setDeal({ ...deal, schedule: newSchedule });
     };
@@ -418,21 +433,34 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
         // 3. Logic Branching
         if (remainingBalance > 0) {
             // Case A: Partial Payment -> Create Carry-Forward Row
-            // Current row stays as history (Due: Original, Paid: Actual)
             
-            // Clean naming to avoid (Bal) (Bal)
+            // Clean naming
             let baseLabel = current.label;
             if (baseLabel.includes('(Balance)')) {
-                // Keep same name if it's already a balance row
+                // Keep same name
             } else {
                 baseLabel = `${baseLabel} (Balance)`;
             }
+
+            // 4. SMART CREDIT DEADLINE LOGIC
+            const safeStartStr = deal.startDate.includes('T') ? deal.startDate : `${deal.startDate}T12:00:00`;
+            const startDateObj = new Date(safeStartStr);
+            const totalNum = parseFloat(deal.totalDurationVal) || 0;
+            
+            const deadlineDate = new Date(startDateObj);
+            if (deal.totalDurationUnit === 'Days') {
+                deadlineDate.setDate(deadlineDate.getDate() + totalNum);
+            } else {
+                deadlineDate.setMonth(deadlineDate.getMonth() + totalNum);
+            }
+            const formattedDeadline = deadlineDate.toISOString().split('T')[0];
 
             const balRow: PaymentInstallment = {
                 ...current,
                 id: Date.now(),
                 label: baseLabel,
-                expectedAmount: remainingBalance, // This is the new debt
+                expectedAmount: remainingBalance, 
+                dueDate: formattedDeadline, // USE AGREED DEADLINE
                 paidAmount: '',
                 isPaid: false,
                 isInterim: false,
@@ -557,8 +585,6 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                 const isPaid = item.isPaid;
                                 
                                 // Calc Balance for this row logic: Balance = Prev Balance - Paid
-                                // If not paid, balance doesn't reduce yet for display purposes usually, 
-                                // BUT per your requirement "Running Balance", we show what's left after this payment if paid.
                                 let displayBalance = runningBalance;
                                 if (isPaid) {
                                     runningBalance -= Number(item.paidAmount);
@@ -743,6 +769,11 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                             <tr>
                                                 <td style={{ paddingBottom: '4px', color: '#6b7280' }}>Area:</td>
                                                 <td style={{ paddingBottom: '4px', fontWeight: 'bold', textAlign: 'right' }}>{formatInputNumber(plotData.areaVaar)} Vaar</td>
+                                            </tr>
+                                            {/* ADDED LAND RATE */}
+                                            <tr>
+                                                <td style={{ paddingBottom: '4px', color: '#6b7280' }}> Rate:</td>
+                                                <td style={{ paddingBottom: '4px', fontWeight: 'bold', textAlign: 'right' }}>{formatCurrency(Number(plotData.customLandRate))} / vaar</td>
                                             </tr>
                                             <tr>
                                                 <td style={{ color: '#6b7280' }}>Dimensions:</td>
