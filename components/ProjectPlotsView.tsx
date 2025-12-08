@@ -42,7 +42,7 @@ interface PaymentInstallment {
   expectedAmount: number;
   
   // Payment State
-  paidAmount: number | ''; 
+  paidAmount: number | string; // Fix: Allow string for decimal typing
   isPaid: boolean;
   paymentDate?: string;
   
@@ -671,11 +671,30 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, plotId, plotData,
                                                     </div>
                                                 </div>
 
-                                                    {/* 2. Amount */}
+                                                   {/* 2. Amount */}
                                                     <div>
                                                         <label className={labelClass}>Amount Received</label>
                                                         <div className="relative h-[42px]">
-                                                            <input type="text" inputMode="decimal" value={formatIndianInput(item.paidAmount)} onChange={(e) => updateScheduleRow(idx, 'paidAmount', parseInputNumber(e.target.value))} className={`${inputBase} h-full pl-6 font-bold`} placeholder="Enter Amount" />
+                                                            <input 
+                                                                type="text" 
+                                                                inputMode="decimal" 
+                                                                value={
+                                                                    // Fix: Show raw string if user is typing a decimal (e.g. "12." or "0.50")
+                                                                    String(item.paidAmount).match(/[.]$|[.][0]+$/) 
+                                                                        ? item.paidAmount 
+                                                                        : formatIndianInput(item.paidAmount)
+                                                                } 
+                                                                onChange={(e) => {
+                                                                    // Fix: Manual string parsing to allow dots
+                                                                    const raw = e.target.value.replace(/[^0-9.]/g, '');
+                                                                    const parts = raw.split('.');
+                                                                    // Ensure only one dot exists
+                                                                    const val = parts[0] + (parts.length > 1 ? '.' + parts[1] : '');
+                                                                    updateScheduleRow(idx, 'paidAmount', val);
+                                                                }} 
+                                                                className={`${inputBase} h-full pl-6 font-bold`} 
+                                                                placeholder="Enter Amount" 
+                                                            />
                                                             <span className="absolute left-2.5 top-2.5 text-slate-400 text-xs">₹</span>
                                                         </div>
                                                     </div>
