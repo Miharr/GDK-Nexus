@@ -3,11 +3,9 @@ import {
   ArrowLeft, 
   Save, 
   IndianRupee, 
-  HardHat, 
   Plus,
   Trash2,
   CheckCircle,
-  AlertCircle,
   Users,
   Calendar,
   Search,
@@ -18,7 +16,6 @@ import { supabase } from '../supabaseClient';
 import { 
   ProjectSavedState, 
   PlottingState, 
-  PlottingDevExpense, 
   UnitType
 } from '../types';
 import { formatCurrency, formatInputNumber, parseInputNumber } from '../utils/formatters';
@@ -45,12 +42,6 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
   const [landRate, setLandRate] = useState<number | ''>(''); 
   const [devRate, setDevRate] = useState<number | ''>('');
   
-  const [devExpenses, setDevExpenses] = useState<PlottingDevExpense[]>([
-    { id: '1', description: 'Compound Wall', amount: '' },
-    { id: '2', description: 'Internal Roads', amount: '' },
-    { id: '3', description: 'Entry Gate', amount: '' },
-  ]);
-
   const [plotSales, setPlotSales] = useState<any[]>([]);
   const [totalPlotsConfig, setTotalPlotsConfig] = useState<number>(30); // Default 30 plots
   const [searchQuery, setSearchQuery] = useState('');
@@ -88,7 +79,6 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
     if (existingPlottingData) {
       setLandRate(existingPlottingData.landRate || '');
       setDevRate(existingPlottingData.devRate || '');
-      setDevExpenses(existingPlottingData.developmentExpenses || []);
       setPlotSales(existingPlottingData.plotSales || []);
       // Load total plots config or default to 30
       if(existingPlottingData.totalPlots) setTotalPlotsConfig(existingPlottingData.totalPlots);
@@ -120,8 +110,6 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
   const totalDevAmount = (Number(devRate) || 0) * areaInVaar;
   const grandTotalCost = totalLandAmount + totalDevAmount;
 
-  const totalDevExpenseList = devExpenses.reduce((sum, item) => sum + (item.amount === '' ? 0 : item.amount), 0);
-
   const totalAllocatedVaar = plotSales.reduce((sum, p) => sum + (p.areaVaar || 0), 0);
   const remainingVaar = areaInVaar - totalAllocatedVaar;
   const isOverLimit = remainingVaar < 0;
@@ -138,17 +126,6 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
   });
 
   // --- HANDLERS ---
-  const handleAddExpense = () => {
-    setDevExpenses([...devExpenses, { id: crypto.randomUUID(), description: '', amount: '' }]);
-  };
-
-  const handleRemoveExpense = (id: string) => {
-    setDevExpenses(devExpenses.filter(e => e.id !== id));
-  };
-
-  const handleExpenseChange = (id: string, field: 'description' | 'amount', value: any) => {
-    setDevExpenses(devExpenses.map(e => e.id === id ? { ...e, [field]: value } : e));
-  };
 
   const handleAddPlot = () => {
     setPlotSales([...plotSales, {
@@ -197,9 +174,9 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
     const plottingData: PlottingState = {
       landRate,
       devRate,
-      developmentExpenses: devExpenses,
+      developmentExpenses: [], // Removed as requested
       plotSales: plotSales,
-      totalPlots: totalPlotsConfig, // Save grid config
+      totalPlots: totalPlotsConfig,
       
       deductionPercent: existingPlottingData?.deductionPercent || 0,
       plotGroups: existingPlottingData?.plotGroups || [],
@@ -208,20 +185,14 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
       salesRateUnit: existingPlottingData?.salesRateUnit || 'Vaar'
     };
 
-    const updatedFullData: ProjectSavedState = {
-        ...projectData,
-        overheads: {
-            ...projectData.overheads,
-            developmentCost: totalDevExpenseList
-        }
-    };
-
+    // Note: We are NOT updating full_data overheads anymore since devExpenses is removed from here
+    
     try {
       const { error } = await supabase
         .from('projects')
         .update({ 
             plotting_data: plottingData,
-            full_data: updatedFullData
+            // Only update plotting_data
         }) 
         .eq('id', projectId);
 
@@ -264,11 +235,11 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 md:px-8 mt-8 grid grid-cols-1 md:grid-cols-2 gap-6 pb-20">
+      <main className="max-w-7xl mx-auto px-4 md:px-8 mt-8 grid grid-cols-1 gap-6 pb-20">
         
-        {/* 1. Project Sales */}
-        <div className="md:col-span-1">
-          <Card title="Project Sales" icon={<IndianRupee size={20} />} className="h-full">
+        {/* 1. Project Sales (Top Summary) */}
+        <div>
+          <Card title="Project Sales" icon={<IndianRupee size={20} />}>
             <div className="space-y-5">
                <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200">
                   <span className="text-xs font-bold text-slate-500 uppercase">Plotted Area</span>
@@ -278,43 +249,47 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                   </div>
                </div>
 
-               <div className="grid grid-cols-12 gap-2 items-end">
-                  <div className="col-span-5">
-                     <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Avg Land Rate</label>
-                     <input 
-                       type="text" 
-                       readOnly
-                       value={formatInputNumber(landRate)} 
-                       className={`${inputClass} bg-slate-100 text-slate-600 font-bold`} 
-                       placeholder="Calculated" 
-                     />
-                  </div>
-                  <div className="col-span-7">
-                     <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block text-right">Total Plot Sales</label>
-                     <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-right font-mono font-bold text-slate-700 text-sm">
-                        {formatCurrency(totalLandAmount)}
-                     </div>
-                  </div>
-               </div>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                   {/* Left Col: Land Sales */}
+                   <div className="grid grid-cols-12 gap-2 items-end">
+                      <div className="col-span-5">
+                         <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Avg Land Rate</label>
+                         <input 
+                           type="text" 
+                           readOnly
+                           value={formatInputNumber(landRate)} 
+                           className={`${inputClass} bg-slate-100 text-slate-600 font-bold`} 
+                           placeholder="Calculated" 
+                         />
+                      </div>
+                      <div className="col-span-7">
+                         <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block text-right">Total Plot Sales</label>
+                         <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-right font-mono font-bold text-slate-700 text-sm">
+                            {formatCurrency(totalLandAmount)}
+                         </div>
+                      </div>
+                   </div>
 
-               <div className="grid grid-cols-12 gap-2 items-end">
-                  <div className="col-span-5">
-                     <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Dev Rate</label>
-                     <input 
-                       type="text" 
-                       inputMode="decimal"
-                       value={formatInputNumber(devRate)} 
-                       onChange={e => setDevRate(parseInputNumber(e.target.value))} 
-                       className={inputClass} 
-                       placeholder="₹ / Vaar" 
-                     />
-                  </div>
-                  <div className="col-span-7">
-                     <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block text-right">Total Dev Fees</label>
-                     <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-right font-mono font-bold text-blue-600 text-sm">
-                        {formatCurrency(totalDevAmount)}
-                     </div>
-                  </div>
+                   {/* Right Col: Dev Fees */}
+                   <div className="grid grid-cols-12 gap-2 items-end">
+                      <div className="col-span-5">
+                         <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Dev Rate</label>
+                         <input 
+                           type="text" 
+                           inputMode="decimal"
+                           value={formatInputNumber(devRate)} 
+                           onChange={e => setDevRate(parseInputNumber(e.target.value))} 
+                           className={inputClass} 
+                           placeholder="₹ / Vaar" 
+                         />
+                      </div>
+                      <div className="col-span-7">
+                         <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block text-right">Total Dev Fees</label>
+                         <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-right font-mono font-bold text-blue-600 text-sm">
+                            {formatCurrency(totalDevAmount)}
+                         </div>
+                      </div>
+                   </div>
                </div>
 
                <div className="mt-2 bg-slate-800 text-white p-4 rounded-xl shadow-lg shadow-slate-200">
@@ -327,53 +302,12 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
           </Card>
         </div>
 
-       {/* 2. Development Expenses */}
-        <div className="md:col-span-1">
-           <Card title="Dev Expenses List" icon={<HardHat size={20} />} className="h-full">
-              <div className="flex flex-col h-full">
-                 <div className="flex-1 space-y-2 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar">
-                    {devExpenses.map((item, idx) => (
-                       <div key={item.id} className="flex gap-2 items-center">
-                          <input 
-                            type="text" 
-                            placeholder="Description" 
-                            value={item.description} 
-                            onChange={(e) => handleExpenseChange(item.id, 'description', e.target.value)} 
-                            className={`${inputClass} flex-1 text-xs`} 
-                          />
-                          <input 
-                            type="text"
-                            inputMode="decimal" 
-                            placeholder="Amount" 
-                            value={formatInputNumber(item.amount)} 
-                            onChange={(e) => handleExpenseChange(item.id, 'amount', parseInputNumber(e.target.value))} 
-                            className={`${inputClass} w-24 text-right text-xs`} 
-                          />
-                          <button onClick={() => handleRemoveExpense(item.id)} className="text-slate-400 hover:text-red-500">
-                             <Trash2 size={16} />
-                          </button>
-                       </div>
-                    ))}
-                 </div>
-                 
-                 <button onClick={handleAddExpense} className="mt-4 flex items-center justify-center gap-2 text-xs font-bold text-safety-600 border border-safety-200 rounded-lg py-2 hover:bg-safety-50 transition-colors">
-                    <Plus size={14} /> Add Expense Item
-                 </button>
-
-                 <div className="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center">
-                    <span className="text-xs font-bold text-slate-500 uppercase">Total List Sum</span>
-                    <span className="font-bold text-slate-900">{formatCurrency(totalDevExpenseList)}</span>
-                 </div>
-              </div>
-           </Card>
-        </div>
-
-        {/* 3. Plot Sales (Full Width) */}
-        <div className="md:col-span-2">
+        {/* 2. Plot Sales (List & Grid) */}
+        <div>
            <Card title="Plot Sales" icon={<Users size={20} />}>
               <div className="space-y-4">
                  
-                 {/* INVENTORY GRID (DYNAMIC) */}
+                 {/* INVENTORY GRID (DYNAMIC STATUS) */}
                  <div className="mb-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
                     <div className="flex justify-between items-center mb-4">
                         <div className="flex items-center gap-2">
@@ -394,15 +328,11 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                     <div className="grid grid-cols-5 md:grid-cols-10 gap-2">
                         {Array.from({ length: totalPlotsConfig }).map((_, i) => {
                             const num = i + 1;
-                            // Find matching plot by Manual Number (String comparison)
                             const matchedPlot = plotSales.find(p => String(p.plotNumber) === String(num));
                             
-                            let statusColor = "bg-white border-2 border-slate-200 text-slate-300"; // Default Empty
+                            let statusColor = "bg-white border-2 border-slate-200 text-slate-300"; 
                             if (matchedPlot) {
-                                // Default to Booked (Orange)
                                 statusColor = "bg-orange-100 border-2 border-orange-400 text-orange-700 font-bold";
-                                
-                                // Check if Fully Sold (Green)
                                 const deal = matchedPlot.dealStructure;
                                 if (deal && deal.schedule && deal.schedule.length > 0) {
                                     const isFullyPaid = deal.schedule.every((s: any) => s.isPaid);
@@ -421,6 +351,34 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                         <span className="flex items-center gap-1"><div className="w-3 h-3 bg-white border-2 border-slate-200 rounded"></div> Available</span>
                         <span className="flex items-center gap-1"><div className="w-3 h-3 bg-orange-100 border-2 border-orange-400 rounded"></div> Booked</span>
                         <span className="flex items-center gap-1"><div className="w-3 h-3 bg-emerald-100 border-2 border-emerald-500 rounded"></div> Sold</span>
+                    </div>
+                 </div>
+
+                 {/* Land Utilization Tracker */}
+                 <div className={`p-4 rounded-xl border ${isOverLimit ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
+                    <div className="flex justify-between items-end mb-2">
+                       <div>
+                          <div className="text-xs font-bold uppercase text-slate-400 mb-1">Land Utilization</div>
+                          <div className="flex items-baseline gap-2">
+                             <span className={`text-xl font-bold ${isOverLimit ? 'text-red-600' : 'text-slate-800'}`}>
+                                {formatInputNumber(totalAllocatedVaar)}
+                             </span>
+                             <span className="text-sm text-slate-400">/ {formatInputNumber(areaInVaar)} Vaar</span>
+                          </div>
+                       </div>
+                       <div className="text-right">
+                          <div className="text-xs font-bold uppercase text-slate-400 mb-1">Remaining</div>
+                          <div className={`text-lg font-bold ${isOverLimit ? 'text-red-600' : 'text-emerald-600'}`}>
+                             {formatInputNumber(remainingVaar)} <span className="text-xs font-medium">Vaar</span>
+                          </div>
+                       </div>
+                    </div>
+                    
+                    <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
+                       <div 
+                          className={`h-full transition-all duration-500 ${isOverLimit ? 'bg-red-500' : 'bg-emerald-500'}`}
+                          style={{ width: `${Math.min(utilizationPercent, 100)}%` }}
+                       />
                     </div>
                  </div>
 
@@ -563,13 +521,11 @@ export const PlottingDashboard: React.FC<Props> = ({ onBack, onOpenMenu, project
                                           inputMode="decimal"
                                           placeholder="₹ Rate" 
                                           value={
-                                              // Fix: Allow decimal typing by checking for trailing dot or .00
                                               String(plot.customLandRate).match(/[.]$|[.][0]+$/) 
                                                   ? plot.customLandRate 
                                                   : formatInputNumber(plot.customLandRate)
                                           }
                                           onChange={(e) => {
-                                              // Fix: Manual regex to allow decimal points while typing
                                               const raw = e.target.value.replace(/[^0-9.]/g, '');
                                               const parts = raw.split('.');
                                               const val = parts[0] + (parts.length > 1 ? '.' + parts[1] : '');
