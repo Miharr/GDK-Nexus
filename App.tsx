@@ -41,7 +41,7 @@ const App: React.FC = () => {
     // 4. Navigate
     setTimeout(() => {
       setCurrentView(view);
-    }, 300);
+    }, 2000);
   };
 
   const handleBackToDash = () => {
