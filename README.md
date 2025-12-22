@@ -23,7 +23,7 @@
 
 ## ⚡ Overview
 
-**GDK NEXUS 2442** is a robust real estate ERP designed to streamline the complex lifecycle of land development. From initial **Land Acquisition** deal structuring (Jantri vs. Market Rate) to **Plotting Layout** costs and final **Customer Sales** management.
+**GDK NEXUS 2442** is a robust real estate ERP designed to streamline the complex lifecycle of land development. From initial **Land Acquisition** deal structuring to **Plotting Layout** costs and final **Customer Sales** management.
 
 It features a unified interface for calculating deal viability, tracking development expenses, and managing individual plot sales with dynamic payment timelines.
 
