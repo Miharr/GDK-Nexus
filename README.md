@@ -58,35 +58,6 @@ It features a unified interface for calculating deal viability, tracking develop
 
 ---
 
-## 💻 Run Locally
-
-Follow these steps to get the Enterprise Command System running on your local machine.
-
-### Prerequisites
-* **Node.js** (v16+ recommended)
-* **npm** or **yarn**
-
-### Installation
-
-1.  **Clone the repository & Install dependencies:**
-    ```bash
-    npm install
-    ```
-
-2.  **Configure Environment:**
-    Create a `.env.local` file in the root directory and add your keys:
-    ```env
-    VITE_SUPABASE_URL=your_supabase_url_here
-    VITE_SUPABASE_ANON_KEY=your_supabase_anon_key_here
-    # If using Google AI features:
-    GEMINI_API_KEY=your_gemini_key_here
-    ```
-
-3.  **Launch the App:**
-    ```bash
-    npm run dev
-    ```
-
 <div align="center">
   <br />
   <p><sub>SECURE CONNECTION // ENCRYPTED V.4.2.0</sub></p>
