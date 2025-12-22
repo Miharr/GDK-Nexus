@@ -18,7 +18,8 @@ import {
   MessageSquare,
   PlusCircle,
   User,
-  Trash2
+  Trash2,
+  Download
 } from 'lucide-react';
 import { ProjectSavedState } from '../types';
 import { formatCurrency, formatInputNumber, parseInputNumber } from '../utils/formatters';
@@ -122,7 +123,7 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedPlotId, setExpandedPlotId] = useState<string | null>(null);
   const [localPlottingData, setLocalPlottingData] = useState(plottingData);
-
+  const [showReportPreview, setShowReportPreview] = useState(false);
   useEffect(() => {
     setLocalPlottingData(plottingData);
   }, [plottingData]);
@@ -212,9 +213,21 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
               </div>
             </div>
           </div>
-          <button onClick={handleGenerateProjectReport} className="bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 shadow hover:bg-slate-900 transition-all">
-            <FileText size={16} /> <span className="hidden md:inline">Project Report</span>
-          </button>
+          <div className="flex gap-2">
+            <button 
+              onClick={() => setShowReportPreview(true)} 
+              className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm"
+            >
+              <LayoutGrid size={16} className="text-orange-500" />
+              <span className="hidden md:inline">Preview</span>
+            </button>
+            <button 
+              onClick={handleGenerateProjectReport} 
+              className="bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 shadow hover:bg-slate-900 transition-all"
+            >
+              <FileText size={16} /> <span className="hidden md:inline">Project Report</span>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -383,10 +396,27 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
                  gTotalPend += pending;
 
                  return (
-                    <tr key={plot.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                       <td style={{ padding: '8px', fontWeight: 'bold' }}>{plot.plotNumber}</td>
-                       <td style={{ padding: '8px' }}>{plot.customerName}</td>
-                       <td style={{ padding: '8px', textAlign: 'right' }}>{formatCurrency(grossVal)}</td>
+  <tr key={plot.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+     <td style={{ padding: '8px', fontWeight: 'bold' }}>{plot.plotNumber}</td>
+     <td style={{ padding: '8px' }}>
+        <div style={{ fontWeight: 'bold' }}>{plot.customerName}</div>
+        <div style={{ fontSize: '8.5px', color: '#4b5563', marginTop: '2px' }}>
+            <span style={{ color: '#9a3412', fontWeight: 'bold' }}>FROM:</span> {displayDate(plot.dealStructure?.startDate || plot.bookingDate)} 
+            <span style={{ margin: '0 4px', color: '#d1d5db' }}>|</span>
+            <span style={{ color: '#9a3412', fontWeight: 'bold' }}>TO:</span> {(() => {
+                const deal = plot.dealStructure;
+                if (!deal?.startDate || !deal?.totalDurationVal) return '-';
+                try {
+                    const d = new Date(deal.startDate + 'T12:00:00');
+                    const val = parseInt(deal.totalDurationVal) || 0;
+                    if (deal.totalDurationUnit === 'Days') d.setDate(d.getDate() + val);
+                    else d.setMonth(d.getMonth() + val);
+                    return displayDate(d.toISOString().split('T')[0]);
+                } catch(e) { return '-'; }
+            })()}
+        </div>
+     </td>
+     <td style={{ padding: '8px', textAlign: 'right' }}>{formatCurrency(grossVal)}</td>
                        <td style={{ padding: '8px', textAlign: 'right', color: '#ef4444' }}>{commission > 0 ? formatCurrency(commission) : '-'}</td>
                        <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(netVal)}</td>
                        <td style={{ padding: '8px', textAlign: 'right', color: '#059669' }}>{formatCurrency(received)}</td>
@@ -449,6 +479,177 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
          })()}
       </div>
 
+    {/* MOBILE FRIENDLY REPORT PREVIEW MODAL */}
+      {showReportPreview && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-0 md:p-6 transition-all">
+          <div className="bg-white w-full h-full md:h-auto md:max-h-[90vh] md:max-w-6xl md:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 bg-slate-50 border-b border-slate-200">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">Project Sales Preview</h2>
+                <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">{projectData.identity.village}</p>
+              </div>
+              <button 
+                onClick={() => setShowReportPreview(false)}
+                className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+              >
+                <ArrowLeft className="rotate-90 text-slate-500" size={24} />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 overflow-y-auto p-4 md:p-8">
+              {(() => {
+                // Re-calculating report data for the preview
+                const m = projectData.measurements;
+                let baseVal = 0;
+                let baseUnit = 'Vaar';
+                if (m.plottedArea && Number(m.plottedArea) > 0) {
+                  baseVal = Number(m.plottedArea);
+                  baseUnit = m.plottedUnit || 'Vaar';
+                } else {
+                  const inputVal = Number(m.areaInput) || 0;
+                  let valInVigha = m.inputUnit === 'Vigha' ? inputVal : inputVal / CONVERSION_RATES[m.inputUnit || 'Vigha'];
+                  baseVal = valInVigha * 0.60;
+                  baseUnit = 'Vigha';
+                }
+                const areaInVaar = baseVal * (CONVERSION_RATES['Vaar'] / CONVERSION_RATES[baseUnit]);
+                const projectEstSale = areaInVaar * ((Number(data.landRate)||0) + (Number(data.devRate)||0));
+
+                let gTotalGross = 0; let gTotalComm = 0; let gTotalNet = 0; let gTotalRec = 0; let gTotalPend = 0;
+
+                const plotSummary = filteredPlots.map((plot:any) => {
+                  const pArea = Number(plot.areaVaar) || 0;
+                  const pLandRate = Number(plot.customLandRate) || landRate;
+                  const gross = pArea * (pLandRate + devRate);
+                  const deal = plot.dealStructure || {};
+                  const comm = deal.agentCommissionType === 'percent' ? Math.round((pArea * pLandRate) * ((Number(deal.agentCommission)||0)/100)) : (Number(deal.agentCommission)||0);
+                  const net = gross - comm;
+                  const rec = (deal.schedule || []).reduce((s:number, i:any) => s + (i.isPaid ? Number(i.paidAmount) : 0), 0);
+                  const pend = net - rec;
+
+                  gTotalGross += gross; gTotalComm += comm; gTotalNet += net; gTotalRec += rec; gTotalPend += pend;
+                  return { ...plot, gross, comm, net, rec, pend };
+                });
+
+                return (
+                  <div className="space-y-8">
+                    {/* Top Stats Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="bg-slate-100 p-4 rounded-xl">
+                        <p className="text-[10px] text-slate-500 font-bold uppercase mb-1">Total Est. Sale</p>
+                        <p className="text-lg font-bold text-slate-900">{formatCurrency(projectEstSale)}</p>
+                      </div>
+                      <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+                        <p className="text-[10px] text-emerald-600 font-bold uppercase mb-1">Total Sold (Gross)</p>
+                        <p className="text-lg font-bold text-emerald-700">{formatCurrency(gTotalGross)}</p>
+                      </div>
+                      <div className="bg-orange-50 p-4 rounded-xl border border-orange-100">
+                        <p className="text-[10px] text-orange-600 font-bold uppercase mb-1">Unsold Value</p>
+                        <p className="text-lg font-bold text-orange-700">{formatCurrency(projectEstSale - gTotalGross)}</p>
+                      </div>
+                    </div>
+
+                    {/* Table Summary */}
+                    <div className="border border-slate-200 rounded-xl overflow-hidden">
+                      <table className="w-full text-xs text-left">
+                        <thead className="bg-slate-900 text-white uppercase text-[10px]">
+                          <tr>
+                            <th className="px-4 py-3">Plot</th>
+                            <th className="px-4 py-3">Customer</th>
+                            <th className="px-4 py-3 text-left">Deal Period</th>
+                            <th className="px-4 py-3 text-right">Net Deal</th>
+                            <th className="px-4 py-3 text-right">Received</th>
+                            <th className="px-4 py-3 text-right">Pending</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {plotSummary.map((p) => (
+                           <tr key={p.id} className="hover:bg-slate-50">
+  <td className="px-4 py-3 font-bold text-slate-700">#{p.plotNumber}</td>
+  <td className="px-4 py-3">
+    <div className="font-bold text-slate-900">{p.customerName}</div>
+    <div className="text-[10px] text-slate-400">{p.phoneNumber}</div>
+  </td>
+ <td className="px-4 py-3 text-[10px]">
+  <div className="flex flex-col gap-1">
+    <div className="text-slate-500 font-medium">
+      {displayDate(p.dealStructure?.startDate || p.bookingDate)} to 
+    </div>
+    <div className="font-bold text-slate-800">
+      {(() => {
+        const deal = p.dealStructure;
+        if (!deal?.startDate || !deal?.totalDurationVal) return '-';
+        const d = new Date(deal.startDate + 'T12:00:00');
+        const val = parseInt(deal.totalDurationVal) || 0;
+        if (deal.totalDurationUnit === 'Days') d.setDate(d.getDate() + val);
+        else d.setMonth(d.getMonth() + val);
+        
+        const endDateStr = d.toISOString().split('T')[0];
+        
+        // --- Calculate Time Left ---
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const diffTime = d.getTime() - today.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        
+        let statusBadge = null;
+        if (diffDays < 0) {
+          statusBadge = <span className="ml-2 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[9px] border border-red-200">Expired</span>;
+        } else if (diffDays <= 30) {
+          statusBadge = <span className="ml-2 px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded text-[9px] border border-orange-200">{diffDays} days left</span>;
+        } else {
+          statusBadge = <span className="ml-2 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-[9px] border border-blue-100">{Math.floor(diffDays/30)} months left</span>;
+        }
+
+        return (
+          <div className="flex items-center">
+            {displayDate(endDateStr)}
+            {statusBadge}
+          </div>
+        );
+      })()}
+    </div>
+  </div>
+</td>
+  <td className="px-4 py-3 text-right font-semibold">{formatCurrency(p.net)}</td>
+                              <td className="px-4 py-3 text-right text-emerald-600 font-bold">{formatCurrency(p.rec)}</td>
+                              <td className="px-4 py-3 text-right text-orange-600 font-bold">{formatCurrency(p.pend)}</td>
+                            </tr>
+                          ))}
+                          <tr className="bg-slate-50 font-bold text-slate-900 border-t-2 border-slate-200">
+                            <td colSpan={2} className="px-4 py-4 text-center uppercase">Grand Totals</td>
+                            <td className="px-4 py-4 text-right">{formatCurrency(gTotalNet)}</td>
+                            <td className="px-4 py-4 text-right text-emerald-700">{formatCurrency(gTotalRec)}</td>
+                            <td className="px-4 py-4 text-right text-orange-700">{formatCurrency(gTotalPend)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-3">
+              <button 
+                onClick={handleGenerateProjectReport}
+                className="flex-1 bg-slate-900 text-white py-3 rounded-xl font-bold text-sm shadow-lg hover:bg-black transition-all flex items-center justify-center gap-2"
+              >
+                <Download size={18} /> Download Full PDF
+              </button>
+              <button 
+                onClick={() => setShowReportPreview(false)}
+                className="px-6 py-3 bg-white border border-slate-300 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-100 transition-all"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -855,8 +1056,32 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
                             <div style={{ display: 'flex', gap: '30px', marginBottom: '30px' }}>
                                 <div style={{ flex: 1, backgroundColor: '#f9fafb', padding: '15px', borderRadius: '4px', border: '1px solid #e5e7eb' }}>
                                     <h3 style={{ margin: '0 0 10px 0', fontSize: '11px', textTransform: 'uppercase', color: '#9ca3af', fontWeight: 'bold', letterSpacing: '1px' }}>Buyer Details</h3>
-                                    <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#111827', marginBottom: '2px' }}>{plotData.customerName || 'N/A'}</div>
-                                    <div style={{ fontSize: '12px', color: '#4b5563' }}>Phone: {plotData.phoneNumber || '-'}</div>
+                                   <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#111827', marginBottom: '2px' }}>{plotData.customerName || 'N/A'}</div>
+<div style={{ fontSize: '12px', color: '#4b5563', marginBottom: '8px' }}>Phone: {plotData.phoneNumber || '-'}</div>
+
+{/* Corrected Deal Period Logic */}
+<div style={{ fontSize: '10px', color: '#374151', borderTop: '1px solid #e5e7eb', paddingTop: '8px' }}>
+    <div style={{ marginBottom: '2px' }}>
+        <strong style={{ color: '#f97316' }}>DEAL START:</strong> {displayDate(deal.startDate || plotData.bookingDate)}
+    </div>
+    <div>
+        <strong style={{ color: '#f97316' }}>DEAL END:</strong> {(() => {
+            // Use local 'deal' state for fresh math
+            if (!deal.startDate || !deal.totalDurationVal) return '-';
+            
+            const endDate = new Date(deal.startDate + 'T12:00:00');
+            const duration = parseInt(deal.totalDurationVal) || 0;
+            
+            if (deal.totalDurationUnit === 'Days') {
+                endDate.setDate(endDate.getDate() + duration);
+            } else {
+                endDate.setMonth(endDate.getMonth() + duration);
+            }
+            
+            return displayDate(endDate.toISOString().split('T')[0]);
+        })()}
+    </div>
+</div>
                                 </div>
                                 <div style={{ flex: 1, backgroundColor: '#f9fafb', padding: '15px', borderRadius: '4px', border: '1px solid #e5e7eb' }}>
                                     <h3 style={{ margin: '0 0 10px 0', fontSize: '11px', textTransform: 'uppercase', color: '#9ca3af', fontWeight: 'bold', letterSpacing: '1px' }}>Property Details</h3>

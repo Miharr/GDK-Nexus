@@ -59,6 +59,10 @@ interface Props {
 
 export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData, initialId }) => {
   
+  // Fancy UI State for sliding input
+  const [addingToId, setAddingToId] = useState<string | null>(null);
+const [flashingId, setFlashingId] = useState<string | null>(null);
+  
   // --- STATE ---
   const [currentProjectId, setCurrentProjectId] = useState<number | null>(initialId || null);
   const [identity, setIdentity] = useState<LandIdentity>({
@@ -784,15 +788,85 @@ const handleDpAmountChange = (val: string) => {
                 {/* Custom Expenses List */}
                 <div className="col-span-2 border-t border-slate-100 pt-3 mt-1">
                    <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Extra Expenses</label>
-                   <div className="space-y-2">
-                      {(overheads.customExpenses || []).map(item => (
-                        <div key={item.id} className="flex gap-2">
-                           <input type="text" placeholder="Name" value={item.name} onChange={e => updateCustomExpense(item.id, 'name', e.target.value)} className={`${inputClass} !py-1.5`} />
-                           <input type="text" inputMode="decimal" placeholder="Amount" value={formatInputNumber(item.amount)} onChange={e => updateCustomExpense(item.id, 'amount', e.target.value)} className={`${inputClass} !py-1.5 w-24 text-right`} />
-                           <button onClick={() => removeCustomExpense(item.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button>
-                        </div>
-                      ))}
-                   </div>
+                   <div className="space-y-3">
+  {(overheads.customExpenses || []).map(item => (
+    <div key={item.id} className="flex items-center gap-2 group animate-in fade-in duration-300">
+      {/* Name Input */}
+      <input 
+        type="text" 
+        placeholder="Name" 
+        value={item.name} 
+        onChange={e => updateCustomExpense(item.id, 'name', e.target.value)} 
+        className={`${inputClass} !py-1.5 flex-1 min-w-0`} 
+      />
+
+      {/* Amount + Sliding Adder Wrapper */}
+      <div className="flex items-center bg-white border border-slate-300 rounded-lg px-2 h-[38px] shadow-sm">
+        {/* Main Total Amount */}
+        <input 
+          type="text" 
+          inputMode="decimal" 
+          value={formatInputNumber(item.amount)} 
+          onChange={e => updateCustomExpense(item.id, 'amount', e.target.value)} 
+          className="w-20 bg-transparent text-right font-bold text-slate-800 text-sm outline-none" 
+        />
+
+        {/* THE FANCY SLIDING BOX */}
+        <div className={`flex items-center transition-all duration-300 ease-in-out overflow-hidden ${addingToId === item.id ? 'w-32 opacity-100 ml-1' : 'w-0 opacity-0'}`}>
+  <div className="h-4 w-px bg-slate-300 mx-1" />
+  <div className="relative flex items-center">
+    <input 
+      type="number"
+      inputMode="decimal"
+      placeholder="+ Add"
+      autoFocus={addingToId === item.id}
+      className="w-20 bg-blue-50 border border-blue-200 rounded-l px-1 text-xs text-blue-700 outline-none font-bold h-8"
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          const extra = parseFloat(e.currentTarget.value) || 0;
+          updateCustomExpense(item.id, 'amount', ((Number(item.amount) || 0) + extra).toString());
+          setAddingToId(null);
+        }
+      }}
+      // Mobile logic: Saves if he just taps away
+      onBlur={(e) => {
+        const val = e.target.value;
+        if (val && val !== '0') {
+           updateCustomExpense(item.id, 'amount', ((Number(item.amount) || 0) + (parseFloat(val) || 0)).toString());
+        }
+        setAddingToId(null);
+      }}
+    />
+    {/* Small Checkmark for tapping on mobile */}
+    <button 
+      type="button"
+      className="bg-blue-600 text-white h-8 px-2 rounded-r flex items-center justify-center active:bg-blue-700"
+    >
+      <CheckCircle size={14} />
+    </button>
+  </div>
+</div>
+
+        {/* Plus Button (Rotates to X when active) */}
+        <button 
+          type="button"
+          onClick={() => setAddingToId(addingToId === item.id ? null : item.id)}
+          className={`ml-1 p-1 rounded-md transition-all active:scale-90 ${addingToId === item.id ? 'bg-safety-500 text-white shadow-inner' : 'text-slate-400 hover:bg-slate-100'}`}
+        >
+          <Plus size={16} className={`transition-transform duration-300 ${addingToId === item.id ? 'rotate-45' : ''}`} />
+        </button>
+      </div>
+
+      {/* Delete Row Button */}
+      <button 
+        onClick={() => removeCustomExpense(item.id)} 
+        className="text-red-300 hover:text-red-600 transition-colors p-1"
+      >
+        <Trash2 size={16} />
+      </button>
+    </div>
+  ))}
+</div>
                    <button onClick={addCustomExpense} className="mt-2 text-xs flex items-center gap-1 bg-slate-100 px-3 py-1.5 rounded-full hover:bg-slate-200 font-bold text-slate-600 transition-colors">
                       <Plus size={12} /> Add Expense
                    </button>
