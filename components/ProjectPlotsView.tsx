@@ -552,8 +552,9 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
                     </div>
 
                     {/* Table Summary */}
-                    <div className="border border-slate-200 rounded-xl overflow-hidden">
-                      <table className="w-full text-xs text-left">
+                    {/* Table Summary with Side-Scroll for Mobile */}
+<div className="border border-slate-200 rounded-xl overflow-x-auto shadow-inner bg-slate-50/30">
+  <table className="w-full text-xs text-left min-w-[800px]">
                         <thead className="bg-slate-900 text-white uppercase text-[10px]">
                           <tr>
                             <th className="px-4 py-3">Plot</th>
@@ -1133,4 +1134,5 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
             )}
         </div>
     );
+
 };
