@@ -620,7 +620,7 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
                             </tr>
                           ))}
                           <tr className="bg-slate-50 font-bold text-slate-900 border-t-2 border-slate-200">
-                            <td colSpan={2} className="px-4 py-4 text-center uppercase">Grand Totals</td>
+                            <td colSpan={3} className="px-4 py-4 text-center uppercase">Grand Totals</td>
                             <td className="px-4 py-4 text-right">{formatCurrency(gTotalNet)}</td>
                             <td className="px-4 py-4 text-right text-emerald-700">{formatCurrency(gTotalRec)}</td>
                             <td className="px-4 py-4 text-right text-orange-700">{formatCurrency(gTotalPend)}</td>
@@ -1136,4 +1136,5 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
     );
 
 };
+
 
