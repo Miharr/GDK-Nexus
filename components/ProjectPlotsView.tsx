@@ -465,7 +465,7 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
                       <tbody>
                          {rows}
                          <tr style={{ backgroundColor: '#f3f4f6', fontWeight: 'bold', borderTop: '2px solid #000' }}>
-                            <td colSpan={2} style={{ padding: '12px', textAlign: 'center' }}>GRAND TOTALS (Sold Plots)</td>
+                            <td colSpan={3} style={{ padding: '12px', textAlign: 'center' }}>GRAND TOTALS (Sold Plots)</td>
                             <td style={{ padding: '12px', textAlign: 'right' }}>{formatCurrency(gTotalGross)}</td>
                             <td style={{ padding: '12px', textAlign: 'right', color: '#ef4444' }}>{formatCurrency(gTotalComm)}</td>
                             <td style={{ padding: '12px', textAlign: 'right' }}>{formatCurrency(gTotalNet)}</td>
@@ -1136,3 +1136,4 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
     );
 
 };
+
