@@ -286,9 +286,15 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
                                         #{plot.plotNumber}
                                     </div>
                                     <div className="col-span-1 md:col-span-3">
-                                        <div className="font-bold text-slate-800">{plot.customerName || 'Unknown'}</div>
-                                        <div className="text-xs text-slate-500">{plot.phoneNumber || '-'}</div>
-                                    </div>
+    <div className="font-bold text-slate-800">{plot.customerName || 'Unknown'}</div>
+    <div className="text-[10px] flex items-center gap-2 mt-0.5">
+        <span className="text-slate-400 font-mono">{plot.phoneNumber || '-'}</span>
+        <span className="text-slate-300">|</span>
+        <span className="text-orange-600 font-bold bg-orange-50 px-1 rounded">
+            {displayDate(plot.dealStructure?.startDate || plot.bookingDate)}
+        </span>
+    </div>
+</div>
                                     <div className="col-span-1 md:col-span-2 text-left md:text-center font-mono text-xs text-slate-600">
                                         <span className="md:hidden text-slate-400 font-sans mr-1">Size:</span>
                                         {formatInputNumber(area)} Vaar
@@ -401,8 +407,7 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
      <td style={{ padding: '8px' }}>
         <div style={{ fontWeight: 'bold' }}>{plot.customerName}</div>
         <div style={{ fontSize: '8.5px', color: '#4b5563', marginTop: '2px' }}>
-            <span style={{ color: '#9a3412', fontWeight: 'bold' }}>FROM:</span> {displayDate(plot.dealStructure?.startDate || plot.bookingDate)} 
-            <span style={{ margin: '0 4px', color: '#d1d5db' }}>|</span>
+<span style={{ color: '#9a3412', fontWeight: 'bold' }}>DEAL DATE:</span> {displayDate(plot.dealStructure?.startDate || plot.bookingDate)}            <span style={{ margin: '0 4px', color: '#d1d5db' }}>|</span>
             <span style={{ color: '#9a3412', fontWeight: 'bold' }}>TO:</span> {(() => {
                 const deal = plot.dealStructure;
                 if (!deal?.startDate || !deal?.totalDurationVal) return '-';
@@ -465,7 +470,7 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
                       <tbody>
                          {rows}
                          <tr style={{ backgroundColor: '#f3f4f6', fontWeight: 'bold', borderTop: '2px solid #000' }}>
-                            <td colSpan={3} style={{ padding: '12px', textAlign: 'center' }}>GRAND TOTALS (Sold Plots)</td>
+                            <td colSpan={2} style={{ padding: '12px', textAlign: 'center' }}>GRAND TOTALS (Sold Plots)</td>
                             <td style={{ padding: '12px', textAlign: 'right' }}>{formatCurrency(gTotalGross)}</td>
                             <td style={{ padding: '12px', textAlign: 'right', color: '#ef4444' }}>{formatCurrency(gTotalComm)}</td>
                             <td style={{ padding: '12px', textAlign: 'right' }}>{formatCurrency(gTotalNet)}</td>
@@ -552,8 +557,7 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
                     </div>
 
                     {/* Table Summary */}
-                    {/* Table Summary with Side-Scroll for Mobile */}
-<div className="border border-slate-200 rounded-xl overflow-x-auto shadow-inner bg-slate-50/30">
+                   <div className="border border-slate-200 rounded-xl overflow-x-auto shadow-inner bg-slate-50/30">
   <table className="w-full text-xs text-left min-w-[800px]">
                         <thead className="bg-slate-900 text-white uppercase text-[10px]">
                           <tr>
@@ -575,9 +579,10 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
   </td>
  <td className="px-4 py-3 text-[10px]">
   <div className="flex flex-col gap-1">
-    <div className="text-slate-500 font-medium">
-      {displayDate(p.dealStructure?.startDate || p.bookingDate)} to 
-    </div>
+    <div className="text-slate-500 font-medium flex items-center gap-1">
+  <Calendar size={10} className="text-orange-400" />
+  {displayDate(p.dealStructure?.startDate || p.bookingDate)} <span className="text-slate-300 mx-1">→</span>
+</div>
     <div className="font-bold text-slate-800">
       {(() => {
         const deal = p.dealStructure;
@@ -668,6 +673,13 @@ interface ManagerProps {
 
 const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId, plotData, projectIdentity, initialDeal, onSave }) => {
     
+    // --- AUTO-SYNC DEAL DATE WITH PLOT DATE ---
+    useEffect(() => {
+        if (plotData.bookingDate && deal.startDate !== plotData.bookingDate && !initialDeal) {
+            setDeal(prev => ({ ...prev, startDate: plotData.bookingDate }));
+        }
+    }, [plotData.bookingDate]);
+
     // Initial State Safety Merge
     const [deal, setDeal] = useState<PlotDealState>({
         startDate: initialDeal?.startDate || getLocalToday(),
@@ -700,15 +712,18 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
     const labelClass = "block text-xs font-bold text-slate-500 uppercase mb-1";
 
     const handleBuildTimeline = () => {
-        const dpVal = deal.dpType === 'percent' 
-            ? Math.round(netTotalValue * ((Number(deal.dpAmount)||0) / 100)) 
-            : (Number(deal.dpAmount)||0);
-        
-        const balance = netTotalValue - dpVal;
-        const nInst = parseFloat(deal.numInstallments) || 0;
+    // Force the use of the most current date available
+    const effectiveStartDate = deal.startDate || plotData.bookingDate || getLocalToday();
 
-        // Date Logic
-        const safeStartStr = deal.startDate.includes('T') ? deal.startDate : `${deal.startDate}T12:00:00`;
+    const dpVal = deal.dpType === 'percent' 
+        ? Math.round(netTotalValue * ((Number(deal.dpAmount)||0) / 100)) 
+        : (Number(deal.dpAmount)||0);
+    
+    const balance = netTotalValue - dpVal;
+    const nInst = parseFloat(deal.numInstallments) || 0;
+
+    // Date Logic
+    const safeStartStr = effectiveStartDate.includes('T') ? effectiveStartDate : `${effectiveStartDate}T12:00:00`;
         const start = new Date(safeStartStr);
         
         const dpNum = parseFloat(deal.dpDurationVal) || 0;
@@ -911,10 +926,46 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4 items-end">
                 <div className="col-span-2 md:col-span-1">
                     <label className={labelClass}>Deal Date</label>
-                    <div className="relative w-full h-[42px] group">
-                        <input type="date" value={deal.startDate} onChange={(e) => setDeal({...deal, startDate: e.target.value})} onClick={(e) => {try{(e.target as HTMLInputElement).showPicker()}catch(err){}}} className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" />
-                        <div className="w-full h-full bg-white border border-slate-300 rounded-lg flex items-center px-3 gap-2 transition-all"><Calendar size={16} className="text-orange-500" /><span className="text-sm font-bold text-slate-800">{displayDate(deal.startDate)}</span></div>
-                    </div>
+                   <div className="relative w-full h-[42px] group">
+    <input 
+    type="date" 
+    value={deal.startDate || plotData.bookingDate} 
+    onChange={(e) => {
+        const newDateStr = e.target.value;
+        const oldDateStr = deal.startDate || plotData.bookingDate;
+        
+        // 1. Update the basic dates
+        setDeal(prev => ({ ...prev, startDate: newDateStr }));
+        plotData.bookingDate = newDateStr; 
+
+        // 2. If a schedule exists, shift all dates automatically
+        if (deal.schedule && deal.schedule.length > 0) {
+            const oldDate = new Date(oldDateStr + 'T12:00:00');
+            const newDate = new Date(newDateStr + 'T12:00:00');
+            const diffTime = newDate.getTime() - oldDate.getTime();
+
+            const updatedSchedule = deal.schedule.map(item => {
+                const currentDue = new Date(item.dueDate + 'T12:00:00');
+                const newDue = new Date(currentDue.getTime() + diffTime);
+                return {
+                    ...item,
+                    dueDate: newDue.toISOString().split('T')[0]
+                };
+            });
+            
+            setDeal(prev => ({ ...prev, schedule: updatedSchedule }));
+        }
+    }}
+        onClick={(e) => {try{(e.target as HTMLInputElement).showPicker()}catch(err){}}} 
+        className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" 
+    />
+    <div className="w-full h-full bg-white border border-slate-300 rounded-lg flex items-center px-3 gap-2 transition-all shadow-sm group-hover:border-orange-400">
+        <Calendar size={16} className="text-orange-500" />
+        <span className="text-sm font-bold text-slate-800">
+            {displayDate(deal.startDate || plotData.bookingDate)}
+        </span>
+    </div>
+</div>
                 </div>
                 <div className="col-span-2 md:col-span-1">
                     <div className="flex justify-between items-center mb-1"><label className={labelClass}>Down Payment</label><div className="flex bg-slate-100 rounded p-0.5"><button onClick={() => setDeal({...deal, dpType: 'percent'})} className={`px-2 py-0.5 text-[10px] font-bold rounded transition-all ${deal.dpType === 'percent' ? 'bg-white shadow text-slate-900' : 'text-slate-400'}`}>%</button><button onClick={() => setDeal({...deal, dpType: 'value'})} className={`px-2 py-0.5 text-[10px] font-bold rounded transition-all ${deal.dpType === 'value' ? 'bg-white shadow text-slate-900' : 'text-slate-400'}`}>₹</button></div></div>
@@ -1063,8 +1114,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
 {/* Corrected Deal Period Logic */}
 <div style={{ fontSize: '10px', color: '#374151', borderTop: '1px solid #e5e7eb', paddingTop: '8px' }}>
     <div style={{ marginBottom: '2px' }}>
-        <strong style={{ color: '#f97316' }}>DEAL START:</strong> {displayDate(deal.startDate || plotData.bookingDate)}
-    </div>
+<strong style={{ color: '#f97316' }}>AGREEMENT DATE:</strong> {displayDate(deal.startDate || plotData.bookingDate)}    </div>
     <div>
         <strong style={{ color: '#f97316' }}>DEAL END:</strong> {(() => {
             // Use local 'deal' state for fresh math
@@ -1134,7 +1184,4 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
             )}
         </div>
     );
-
 };
-
-
