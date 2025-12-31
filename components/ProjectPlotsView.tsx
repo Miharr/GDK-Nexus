@@ -123,8 +123,9 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedPlotId, setExpandedPlotId] = useState<string | null>(null);
   const [localPlottingData, setLocalPlottingData] = useState(plottingData);
-  const [showReportPreview, setShowReportPreview] = useState(false);
-  useEffect(() => {
+const [showReportPreview, setShowReportPreview] = useState(false);
+  const [showCollectionModal, setShowCollectionModal] = useState(false);
+  const [collectionDates, setCollectionDates] = useState({ from: getLocalToday(), to: getLocalToday() });  useEffect(() => {
     setLocalPlottingData(plottingData);
   }, [plottingData]);
 
@@ -213,9 +214,16 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
               </div>
             </div>
           </div>
-          <div className="flex gap-2">
+         <div className="flex gap-2">
             <button 
-              onClick={() => setShowReportPreview(true)} 
+              onClick={() => setShowCollectionModal(true)} 
+              className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm"
+            >
+              <Banknote size={16} className="text-emerald-500" />
+              <span className="hidden md:inline">Collection Statement</span>
+            </button>
+            <button 
+              onClick={() => setShowReportPreview(true)}
               className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm"
             >
               <LayoutGrid size={16} className="text-orange-500" />
@@ -656,6 +664,208 @@ export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottin
           </div>
         </div>
       )}
+   {/* 🧾 COLLECTION STATEMENT MODAL */}
+      {showCollectionModal && (
+        <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-emerald-50 text-emerald-900">
+              <div>
+                <h3 className="text-lg font-bold">Collection Statement</h3>
+                <p className="text-xs font-medium uppercase tracking-wider opacity-70">{projectData.identity.village}</p>
+              </div>
+              <button onClick={() => setShowCollectionModal(false)} className="p-2 hover:bg-white rounded-full transition-all">
+                <ArrowLeft className="rotate-90 text-slate-500" size={20} />
+              </button>
+            </div>
+
+         {/* 🗓️ FULLY CLICKABLE DATE PICKERS (SYNCED WITH WORKING MODULE) */}
+            <div className="p-6 bg-slate-50 border-b border-slate-200 grid grid-cols-2 gap-4">
+              {/* FROM DATE */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1 ml-1">From Date</label>
+                <div className="relative w-full h-[48px] group/date">
+                  <input 
+                    type="date" 
+                    value={collectionDates.from}
+                    onChange={(e) => setCollectionDates({...collectionDates, from: e.target.value})}
+                    onClick={(e) => {
+                        try { (e.target as HTMLInputElement).showPicker(); } catch(err) {}
+                    }}
+                    className="
+                        absolute inset-0 w-full h-full z-20 
+                        opacity-0 cursor-pointer
+                        [&::-webkit-calendar-picker-indicator]:absolute
+                        [&::-webkit-calendar-picker-indicator]:w-full
+                        [&::-webkit-calendar-picker-indicator]:h-full
+                        [&::-webkit-calendar-picker-indicator]:opacity-0
+                    "
+                  />
+                  <div className="absolute inset-0 w-full h-full bg-white border border-slate-300 rounded-xl flex items-center px-4 gap-3 text-sm font-bold text-slate-800 group-hover/date:border-emerald-500 transition-all shadow-sm z-10 pointer-events-none select-none">
+                    <Calendar size={18} className="text-emerald-500" /> 
+                    <span>{displayDate(collectionDates.from)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* TO DATE */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1 ml-1">To Date</label>
+                <div className="relative w-full h-[48px] group/date">
+                  <input 
+                    type="date" 
+                    value={collectionDates.to}
+                    onChange={(e) => setCollectionDates({...collectionDates, to: e.target.value})}
+                    onClick={(e) => {
+                        try { (e.target as HTMLInputElement).showPicker(); } catch(err) {}
+                    }}
+                    className="
+                        absolute inset-0 w-full h-full z-20 
+                        opacity-0 cursor-pointer
+                        [&::-webkit-calendar-picker-indicator]:absolute
+                        [&::-webkit-calendar-picker-indicator]:w-full
+                        [&::-webkit-calendar-picker-indicator]:h-full
+                        [&::-webkit-calendar-picker-indicator]:opacity-0
+                    "
+                  />
+                  <div className="absolute inset-0 w-full h-full bg-white border border-slate-300 rounded-xl flex items-center px-4 gap-3 text-sm font-bold text-slate-800 group-hover/date:border-emerald-500 transition-all shadow-sm z-10 pointer-events-none select-none">
+                    <Calendar size={18} className="text-emerald-500" /> 
+                    <span>{displayDate(collectionDates.to)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              {(() => {
+                const allPayments: any[] = [];
+                plots.forEach((plot: any) => {
+                  (plot.dealStructure?.schedule || []).forEach((inst: any) => {
+                    if (inst.isPaid && inst.paymentDate >= collectionDates.from && inst.paymentDate <= collectionDates.to) {
+                      allPayments.push({ ...inst, plotNumber: plot.plotNumber, customerName: plot.customerName, phoneNumber: plot.phoneNumber });
+                    }
+                  });
+                });
+
+                if (allPayments.length === 0) return <div className="text-center py-20 text-slate-400 italic">No payments recorded for this period.</div>;
+
+                const totalInPeriod = allPayments.reduce((sum, p) => sum + Number(p.paidAmount || 0), 0);
+
+                return (
+                  <div className="space-y-4">
+                    <div className="bg-emerald-600 text-white p-5 rounded-2xl flex justify-between items-center shadow-lg shadow-emerald-100">
+                       <span className="text-xs font-bold uppercase tracking-widest opacity-80">Total Collected in Period</span>
+                       <span className="text-2xl font-bold">{formatCurrency(totalInPeriod)}</span>
+                    </div>
+
+                    <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm bg-white">
+                      <table className="w-full text-xs text-left">
+                        <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[9px] border-b">
+                          <tr>
+                            <th className="px-4 py-3">Payment Date</th>
+                            <th className="px-4 py-3">Plot</th>
+                            <th className="px-4 py-3">Customer</th>
+                            <th className="px-4 py-3 text-right">Amount</th>
+                            <th className="px-4 py-3 text-center">Mode</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {allPayments.sort((a,b) => a.paymentDate.localeCompare(b.paymentDate)).map((p, i) => (
+                            <tr key={i} className="hover:bg-slate-50">
+                              <td className="px-4 py-3 font-bold text-slate-600">{displayDate(p.paymentDate)}</td>
+                              <td className="px-4 py-3 font-black text-slate-900">#{p.plotNumber}</td>
+                              <td className="px-4 py-3">
+                                <div className="font-bold text-slate-800 uppercase">{p.customerName}</div>
+                                <div className="text-[10px] text-slate-400">{p.phoneNumber}</div>
+                              </td>
+                              <td className="px-4 py-3 text-right font-black text-emerald-600 text-sm">{formatCurrency(p.paidAmount)}</td>
+                              <td className="px-4 py-3 text-center">
+                                <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${p.paymentMode === 'BANK' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>
+                                  {p.paymentMode || 'CASH'}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-200">
+              <button 
+                onClick={() => {
+                  const element = document.getElementById('collection-pdf-template');
+                  if (!element) return;
+                  element.style.display = 'block';
+                  const opt = { 
+                    margin: 0.5, 
+                    filename: `Collection_${projectData.identity.village}_${collectionDates.from}.pdf`, 
+                    image: { type: 'jpeg', quality: 0.98 }, 
+                    html2canvas: { scale: 2 }, 
+                    jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' } 
+                  };
+                  html2pdf().set(opt).from(element).save().then(() => { element.style.display = 'none'; });
+                }}
+                className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold text-sm shadow-xl hover:bg-black transition-all flex items-center justify-center gap-2"
+              >
+                <Download size={18} /> Download Statement (PDF)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 📄 HIDDEN PDF TEMPLATE */}
+      <div id="collection-pdf-template" style={{ display: 'none', padding: '40px', fontFamily: 'sans-serif' }}>
+          <div style={{ borderBottom: '3px solid #059669', paddingBottom: '15px', marginBottom: '25px' }}>
+              <h1 style={{ margin: 0, fontSize: '22px', color: '#111827' }}>COLLECTION STATEMENT</h1>
+              <p style={{ margin: '5px 0', fontSize: '12px', color: '#4b5563', fontWeight: 'bold' }}>
+                Project: {projectData.identity.village} | Dates: {displayDate(collectionDates.from)} to {displayDate(collectionDates.to)}
+              </p>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+              <thead>
+                <tr style={{ backgroundColor: '#f9fafb' }}>
+                  <th style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'left' }}>Date</th>
+                  <th style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'left' }}>Plot</th>
+                  <th style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'left' }}>Customer</th>
+                  <th style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'right' }}>Amount</th>
+                  <th style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'left' }}>Mode</th>
+                </tr>
+              </thead>
+              <tbody>
+                  {(() => {
+                      const pays: any[] = [];
+                      plots.forEach((pl: any) => (pl.dealStructure?.schedule || []).forEach((ins: any) => { 
+                        if (ins.isPaid && ins.paymentDate >= collectionDates.from && ins.paymentDate <= collectionDates.to) {
+                          pays.push({ ...ins, plot: pl.plotNumber, name: pl.customerName }); 
+                        }
+                      }));
+                      const total = pays.reduce((s, p) => s + Number(p.paidAmount), 0);
+                      return (
+                        <>
+                          {pays.sort((a,b) => a.paymentDate.localeCompare(b.paymentDate)).map((p, i) => (
+                            <tr key={i}>
+                                <td style={{ border: '1px solid #e5e7eb', padding: '10px' }}>{displayDate(p.paymentDate)}</td>
+                                <td style={{ border: '1px solid #e5e7eb', padding: '10px', fontWeight: 'bold' }}>#{p.plot}</td>
+                                <td style={{ border: '1px solid #e5e7eb', padding: '10px' }}>{p.name}</td>
+                                <td style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(p.paidAmount)}</td>
+                                <td style={{ border: '1px solid #e5e7eb', padding: '10px' }}>{p.paymentMode || 'CASH'}</td>
+                            </tr>
+                          ))}
+                          <tr style={{ backgroundColor: '#f0fdf4' }}>
+                            <td colSpan={3} style={{ border: '1px solid #e5e7eb', padding: '15px', textAlign: 'right', fontWeight: 'bold' }}>TOTAL COLLECTION:</td>
+                            <td style={{ border: '1px solid #e5e7eb', padding: '15px', textAlign: 'right', fontWeight: 'bold', color: '#059669', fontSize: '14px' }}>{formatCurrency(total)}</td>
+                            <td style={{ border: '1px solid #e5e7eb' }}></td>
+                          </tr>
+                        </>
+                      );
+                  })()}
+              </tbody>
+          </table>
+      </div>
+
     </div>
   );
 };
