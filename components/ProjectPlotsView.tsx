@@ -883,10 +883,36 @@ interface ManagerProps {
 
 const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId, plotData, projectIdentity, initialDeal, onSave }) => {
     
-    // --- AUTO-SYNC DEAL DATE WITH PLOT DATE ---
+    // --- AUTO-SYNC & AUTO-SHIFT TIMELINE ---
     useEffect(() => {
-        if (plotData.bookingDate && deal.startDate !== plotData.bookingDate && !initialDeal) {
-            setDeal(prev => ({ ...prev, startDate: plotData.bookingDate }));
+        const newDateStr = plotData.bookingDate;
+        const oldDateStr = deal.startDate;
+
+        // Only run if the date actually changed and we have a valid source
+        if (newDateStr && oldDateStr && newDateStr !== oldDateStr) {
+            
+            // 1. Calculate the time difference (Offset) using existing variables
+            const oldD = new Date(oldDateStr + 'T12:00:00');
+            const newD = new Date(newDateStr + 'T12:00:00');
+            const timeDiff = newD.getTime() - oldD.getTime();
+
+            // 2. Shift the schedule by the calculated difference
+            const shiftedSchedule = (deal.schedule || []).map(item => {
+                if (!item.dueDate) return item;
+                const currentItemDate = new Date(item.dueDate + 'T12:00:00');
+                const adjustedDate = new Date(currentItemDate.getTime() + timeDiff);
+                return {
+                    ...item,
+                    dueDate: adjustedDate.toISOString().split('T')[0]
+                };
+            });
+
+            // 3. Update the local deal state
+            setDeal(prev => ({
+                ...prev,
+                startDate: newDateStr,
+                schedule: shiftedSchedule
+            }));
         }
     }, [plotData.bookingDate]);
 
