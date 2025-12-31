@@ -756,8 +756,9 @@ const [showReportPreview, setShowReportPreview] = useState(false);
                        <span className="text-2xl font-bold">{formatCurrency(totalInPeriod)}</span>
                     </div>
 
-                    <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm bg-white">
-                      <table className="w-full text-xs text-left">
+                   {/* Horizontal Scroller for Mobile Collection Table */}
+                    <div className="border border-slate-200 rounded-xl overflow-x-auto shadow-sm bg-white">
+                      <table className="w-full text-xs text-left min-w-[600px]">
                         <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[9px] border-b">
                           <tr>
                             <th className="px-4 py-3">Payment Date</th>
