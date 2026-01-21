@@ -108,6 +108,7 @@ const [flashingId, setFlashingId] = useState<string | null>(null);
 
   // --- LEDGER & MODAL STATE ---
   const [isLedgerOpen, setIsLedgerOpen] = useState(false);
+  const [tempAddDate, setTempAddDate] = useState(new Date().toISOString().split('T')[0]);
   const [ledgerRange, setLedgerRange] = useState({
     from: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0], // 1st of current month
     to: new Date().toISOString().split('T')[0] // Today
@@ -386,6 +387,29 @@ const handleClear = () => {
       html2canvas: { scale: 2, useCORS: true, letterRendering: true },
       jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
       pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } // Smart pagination avoids cutting tables/text
+    };
+
+    html2pdf().set(opt).from(element).save().then(() => {
+       element.style.display = 'none'; 
+    });
+ };
+
+  const handleDownloadLedgerPDF = () => {
+    const element = document.getElementById('ledger-pdf-template');
+    if (!element) return;
+    
+    element.style.display = 'block'; 
+    
+    const villageName = identity.village ? identity.village.replace(/\s+/g, '_') : 'Village';
+    const fromDate = new Date(ledgerRange.from).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    const toDate = new Date(ledgerRange.to).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+
+    const opt = {
+      margin: [0.5, 0.5, 0.5, 0.5],
+      filename: `LEDGER_${villageName}_${fromDate}_to_${toDate}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true },
+      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
     };
 
     html2pdf().set(opt).from(element).save().then(() => {
@@ -920,9 +944,14 @@ const handleDpAmountChange = (val: string) => {
                         {/* 3. Add More Drawer */}
                         <div className="mt-4">
                           <div className="flex justify-end">
-                            <button 
+                           <button 
                               type="button"
-                              onClick={() => setAddingToId(addingToId === item.id ? null : item.id)}
+                              onClick={() => {
+                                if (addingToId !== item.id) {
+                                  setTempAddDate(new Date().toISOString().split('T')[0]);
+                                }
+                                setAddingToId(addingToId === item.id ? null : item.id);
+                              }}
                               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black transition-all shadow-sm ${addingToId === item.id ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-blue-600'}`}
                             >
                               {addingToId === item.id ? 'CANCEL' : <><Plus size={14} /> ADD PAYMENT</>}
@@ -939,16 +968,15 @@ const handleDpAmountChange = (val: string) => {
                                        <input 
                                           type="date" 
                                           id={`date-add-${item.id}`}
-                                          defaultValue={new Date().toISOString().split('T')[0]}
+                                          value={tempAddDate}
+                                          onChange={(e) => setTempAddDate(e.target.value)}
                                           onClick={(e) => { try { (e.target as HTMLInputElement).showPicker(); } catch(err) {} }}
-                                          // Note: We'll use local state logic or the id selector as before
                                           className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" 
                                        />
                                        <div className="absolute inset-0 w-full h-full z-10 flex items-center justify-center gap-2 border border-blue-100 rounded-xl bg-white text-blue-600 pointer-events-none select-none group-hover/newdate:border-blue-400 transition-all">
                                           <Calendar size={14} />
                                           <span className="text-[11px] font-bold pt-0.5">
-                                             {/* Displaying current date as default for the drawer view */}
-                                             {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                             {new Date(`${tempAddDate}T12:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                                           </span>
                                        </div>
                                     </div>
@@ -965,9 +993,8 @@ const handleDpAmountChange = (val: string) => {
                                 </div>
                                 <button 
                                   type="button"
-                                  onClick={() => {
-                                    const dateInput = document.getElementById(`date-add-${item.id}`) as HTMLInputElement;
-                                    const dateVal = dateInput.value || new Date().toISOString().split('T')[0];
+                                 onClick={() => {
+                                    const dateVal = tempAddDate;
                                     const amtVal = parseFloat((document.getElementById(`amt-add-${item.id}`) as HTMLInputElement).value) || 0;
                                     if (amtVal > 0) {
                                       const newHistory = [...(item.history || []), { date: dateVal, amount: amtVal }];
@@ -1479,7 +1506,7 @@ const handleDpAmountChange = (val: string) => {
                 </span>
               </div>
               <button 
-                onClick={() => alert("PDF Statement building...")}
+                onClick={handleDownloadLedgerPDF}
                 className="w-full bg-slate-900 text-white h-14 rounded-2xl flex items-center justify-center gap-3 font-black text-sm tracking-widest shadow-xl shadow-slate-200 active:scale-95 transition-all"
               >
                 <Download size={20} /> DOWNLOAD STATEMENT
@@ -1487,7 +1514,90 @@ const handleDpAmountChange = (val: string) => {
             </div>
           </div>
         </div>
-      )}
+     {/* 📥 LEDGER PDF TEMPLATE (HIDDEN) */}
+      <div id="ledger-pdf-template" style={{ display: 'none', width: '700px', backgroundColor: '#fff', color: '#000', fontFamily: 'sans-serif', padding: '40px' }}>
+        {/* Header Section */}
+        <div style={{ borderBottom: '2px solid #3b82f6', paddingBottom: '15px', marginBottom: '25px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+          <div>
+            <h1 style={{ fontSize: '22px', fontWeight: 'bold', margin: 0, color: '#1e40af' }}>EXPENSE LEDGER STATEMENT</h1>
+            <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px' }}>GDK NEXUS 2442 • PROPERTY AUDIT</p>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#000' }}>Project: {identity.village || 'Unnamed Project'}</div>
+            <div style={{ fontSize: '9px', color: '#64748b', marginTop: '2px' }}>FP No: {identity.fpNumber || '-'} | Block No: {identity.blockSurveyNumber || '-'}</div>
+          </div>
+        </div>
+
+        {/* Date Range Summary */}
+        <div style={{ backgroundColor: '#f8fafc', padding: '12px 15px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '25px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <span style={{ fontSize: '9px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold', display: 'block' }}>Statement Period</span>
+            <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#334155' }}>
+              {new Date(`${ledgerRange.from}T12:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} to {new Date(`${ledgerRange.to}T12:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+            </span>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <span style={{ fontSize: '9px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold', display: 'block' }}>Total Period Expense</span>
+            <span style={{ fontSize: '16px', fontWeight: 'bold', color: '#1e40af' }}>
+              {formatCurrency(getFilteredLedger().reduce((sum, t) => sum + t.amount, 0))}
+            </span>
+          </div>
+        </div>
+
+        {/* Ledger Table */}
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+          <thead>
+            <tr style={{ backgroundColor: '#f1f5f9' }}>
+              <th style={{ padding: '12px 10px', textAlign: 'left', borderBottom: '2px solid #cbd5e1', color: '#475569', width: '20%' }}>Date</th>
+              <th style={{ padding: '12px 10px', textAlign: 'left', borderBottom: '2px solid #cbd5e1', color: '#475569', width: '55%' }}>Description / Expense Name</th>
+              <th style={{ padding: '12px 10px', textAlign: 'right', borderBottom: '2px solid #cbd5e1', color: '#475569', width: '25%' }}>Amount (₹)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {getFilteredLedger().length > 0 ? (
+              getFilteredLedger().map((t, i) => (
+                <tr key={i} style={{ pageBreakInside: 'avoid' }}>
+                  <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
+                    {new Date(`${t.date}T12:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </td>
+                  <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9', fontWeight: 'bold', color: '#1e293b' }}>
+                    {t.name}
+                  </td>
+                  <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9', textAlign: 'right', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                    {formatCurrency(t.amount)}
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={3} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8', fontStyle: 'italic' }}>
+                  No transactions recorded for this period.
+                </td>
+              </tr>
+            )}
+          </tbody>
+          <tfoot>
+            <tr style={{ backgroundColor: '#f8fafc' }}>
+              <td colSpan={2} style={{ padding: '15px 10px', textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: '#334155', borderTop: '2px solid #cbd5e1' }}>
+                GRAND TOTAL FOR PERIOD
+              </td>
+              <td style={{ padding: '15px 10px', textAlign: 'right', fontWeight: '900', fontSize: '14px', color: '#1e40af', borderTop: '2px solid #cbd5e1', fontFamily: 'monospace' }}>
+                {formatCurrency(getFilteredLedger().reduce((sum, t) => sum + t.amount, 0))}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+
+        {/* Footer Audit Info */}
+        <div style={{ marginTop: '50px', paddingTop: '15px', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: '8px', color: '#94a3b8' }}>
+            Report UID: {Math.random().toString(36).substr(2, 9).toUpperCase()} | System Generated
+          </div>
+          <div style={{ fontSize: '9px', color: '#64748b', fontWeight: 'bold' }}>
+            Generated: {new Date().toLocaleString('en-GB')}
+          </div>
+        </div>
+      </div>
       
     </div>
   );
