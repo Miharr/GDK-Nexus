@@ -1514,7 +1514,7 @@ const handleDpAmountChange = (val: string) => {
             </div>
           </div>
         </div>
-     {/* 📥 LEDGER PDF TEMPLATE (HIDDEN) */}
+      )/* 📥 LEDGER PDF TEMPLATE (HIDDEN) */}
       <div id="ledger-pdf-template" style={{ display: 'none', width: '700px', backgroundColor: '#fff', color: '#000', fontFamily: 'sans-serif', padding: '40px' }}>
         {/* Header Section */}
         <div style={{ borderBottom: '2px solid #3b82f6', paddingBottom: '15px', marginBottom: '25px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
