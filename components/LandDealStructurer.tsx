@@ -5,6 +5,7 @@ import {
   Ruler, 
   IndianRupee, 
   CalendarDays, 
+  Calendar,
   FileText, 
   Calculator,
   RotateCcw,
@@ -104,6 +105,13 @@ const [flashingId, setFlashingId] = useState<string | null>(null);
   const [costSheetBasis, setCostSheetBasis] = useState<'100' | '60'>('100');
   const [result, setResult] = useState<CalculationResult | null>(null);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+
+  // --- LEDGER & MODAL STATE ---
+  const [isLedgerOpen, setIsLedgerOpen] = useState(false);
+  const [ledgerRange, setLedgerRange] = useState({
+    from: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0], // 1st of current month
+    to: new Date().toISOString().split('T')[0] // Today
+  });
 
   // --- HYDRATION EFFECT ---
  useEffect(() => {
@@ -433,10 +441,22 @@ const handleDpAmountChange = (val: string) => {
   };
 
   // Custom Expense Handlers
+  // New State for Section 5 visibility
+  const [showExpenseBreakdown, setShowExpenseBreakdown] = useState(false);
+
   const addCustomExpense = () => {
     setOverheads(prev => ({
       ...prev,
-      customExpenses: [...(prev.customExpenses || []), { id: Math.random().toString(), name: '', amount: '' }]
+      customExpenses: [
+        ...(prev.customExpenses || []), 
+        { 
+          id: Math.random().toString(), 
+          name: '', 
+          amount: 0, 
+          date: new Date().toISOString().split('T')[0],
+          history: [] // Stores additional top-ups: { date: string, amount: number }
+        }
+      ]
     }));
   };
 
@@ -454,6 +474,34 @@ const handleDpAmountChange = (val: string) => {
       ...prev,
       customExpenses: (prev.customExpenses || []).filter(item => item.id !== id)
     }));
+  };
+
+  const getFilteredLedger = () => {
+    const allTransactions: { date: string; name: string; amount: number }[] = [];
+    
+    (overheads.customExpenses || []).forEach(item => {
+      // 1. Add the base payment
+      if (item.amount > 0) {
+        allTransactions.push({ 
+          date: item.date || financials.purchaseDate, 
+          name: item.name || 'Unnamed Expense', 
+          amount: Number(item.amount) 
+        });
+      }
+      // 2. Add all top-up history
+      (item.history || []).forEach((h: any) => {
+        allTransactions.push({ 
+          date: h.date, 
+          name: item.name || 'Unnamed Expense', 
+          amount: Number(h.amount) 
+        });
+      });
+    });
+
+    // 3. Filter by range and sort newest first
+    return allTransactions
+      .filter(t => t.date >= ledgerRange.from && t.date <= ledgerRange.to)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   };
 
   const getNum = (val: number | string) => (val === '' ? 0 : Number(val));
@@ -478,31 +526,50 @@ const handleDpAmountChange = (val: string) => {
   return (
     <div className="min-h-screen pb-12 bg-slate-50 text-slate-800 animate-in fade-in duration-500 font-sans">
       
-      {/* Header */}
-      <header className="bg-white border-b border-slate-200 py-4 px-4 md:px-8 shadow-sm sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <div className="flex items-center gap-4">
-             <button onClick={onBack} type="button" className="w-10 h-10 rounded-full flex items-center justify-center bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">
-                <ArrowLeft size={20} />
+     {/* 📱 MOBILE-OPTIMIZED HEADER */}
+      <header className="bg-white border-b border-slate-200 py-3 md:py-4 px-3 md:px-8 shadow-sm sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto flex justify-between items-center gap-2">
+          
+          {/* Left: Back & Title */}
+          <div className="flex items-center gap-2 md:gap-4 shrink-0">
+             <button onClick={onBack} type="button" className="w-9 h-9 md:w-10 md:h-10 rounded-full flex items-center justify-center bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">
+                <ArrowLeft size={18} />
              </button>
             <div>
-              <h1 className="text-lg md:text-xl font-bold flex items-center gap-2 text-slate-900">
-                <Building2 className="text-safety-500 h-5 w-5" />
-                Land Acquisition
+              <h1 className="text-sm md:text-xl font-black flex items-center gap-1.5 text-slate-900 leading-tight">
+                <span className="hidden xs:inline">Land Acquisition</span>
+                <span className="xs:hidden">Acquisition</span>
               </h1>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-             <button onClick={handleSaveProject} type="button" className="bg-slate-800 text-white px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 shadow hover:bg-slate-900 transition-all">
-               <Save size={16} /> <span className="hidden md:inline">Save</span>
-             </button>
-            <button onClick={handleClear} type="button" className="px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 flex items-center gap-2 transition-colors">
-              <RotateCcw size={16} /> <span className="hidden md:inline">Clear</span>
+
+          {/* Right: Actions */}
+          <div className="flex items-center gap-1.5 md:gap-3 justify-end shrink">
+            {/* Save/Clear Group */}
+            <div className="flex bg-slate-100 p-1 rounded-lg md:rounded-xl">
+              <button onClick={handleSaveProject} title="Save" className="p-1.5 md:p-2 text-slate-500 hover:text-safety-600 transition-colors"><Save size={18} /></button>
+              <button onClick={handleClear} title="Clear" className="p-1.5 md:p-2 text-slate-500 hover:text-red-500 transition-colors"><RotateCcw size={18} /></button>
+            </div>
+
+            {/* Ledger Button */}
+            <button 
+              onClick={() => setIsLedgerOpen(true)}
+              className="bg-white border border-slate-200 p-2 md:px-4 md:py-2 rounded-lg md:rounded-xl text-slate-700 flex items-center gap-2 shadow-sm active:scale-95 transition-all"
+            >
+              <Clock size={18} className="text-blue-500" />
+              <span className="hidden lg:inline text-xs font-bold uppercase tracking-wider">Ledger</span>
             </button>
-            <button onClick={handleDownloadPDF} type="button" className="bg-safety-500 hover:bg-safety-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 shadow-md shadow-safety-200 transition-all">
-              <Download size={16} /> PDF
+
+            {/* PDF Button */}
+            <button 
+              onClick={handleDownloadPDF} 
+              className="bg-safety-500 p-2 md:px-4 md:py-2 rounded-lg md:rounded-xl text-white flex items-center gap-2 shadow-md active:scale-95 transition-all"
+            >
+              <Download size={18} />
+              <span className="hidden lg:inline text-xs font-bold uppercase tracking-wider">PDF</span>
             </button>
           </div>
+
         </div>
       </header>
 
@@ -785,91 +852,146 @@ const handleDpAmountChange = (val: string) => {
                 <div><label className={labelClass}>NA Premium</label><input type="number" inputMode="decimal" autoComplete="off" value={overheads.naPremium} onChange={e => setOverheads({...overheads, naPremium: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
               <div className="col-span-2"><label className={labelClass}>Development Cost</label><input type="number" inputMode="decimal" autoComplete="off" value={overheads.developmentCost} onChange={e => setOverheads({...overheads, developmentCost: e.target.value === '' ? '' : Number(e.target.value)})} className={inputClass} placeholder="0.00" /></div>
                 
-                {/* Custom Expenses List */}
-                <div className="col-span-2 border-t border-slate-100 pt-3 mt-1">
-                   <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Extra Expenses</label>
-                   <div className="space-y-3">
-  {(overheads.customExpenses || []).map(item => (
-    <div key={item.id} className="flex items-center gap-2 group animate-in fade-in duration-300">
-      {/* Name Input */}
-      <input 
-        type="text" 
-        placeholder="Name" 
-        value={item.name} 
-        onChange={e => updateCustomExpense(item.id, 'name', e.target.value)} 
-        className={`${inputClass} !py-1.5 flex-1 min-w-0`} 
-      />
+               {/* 📂 MOBILE-FIRST EXPENSE CARDS (Ultra-Clickable Date Picker) */}
+                <div className="col-span-2 border-t border-slate-100 pt-5 mt-2">
+                  <div className="flex justify-between items-center mb-4 px-1">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Extra Expenses</label>
+                    <button onClick={addCustomExpense} className="text-[10px] flex items-center gap-1 bg-emerald-50 text-emerald-700 px-3 py-2 rounded-xl hover:bg-emerald-100 font-black transition-all shadow-sm">
+                      <Plus size={14} /> NEW ROW
+                    </button>
+                  </div>
 
-      {/* Amount + Sliding Adder Wrapper */}
-      <div className="flex items-center bg-white border border-slate-300 rounded-lg px-2 h-[38px] shadow-sm">
-        {/* Main Total Amount */}
-        <input 
-          type="text" 
-          inputMode="decimal" 
-          value={formatInputNumber(item.amount)} 
-          onChange={e => updateCustomExpense(item.id, 'amount', e.target.value)} 
-          className="w-20 bg-transparent text-right font-bold text-slate-800 text-sm outline-none" 
-        />
+                  <div className="space-y-4">
+                    {(overheads.customExpenses || []).map(item => (
+                      <div key={item.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm animate-in slide-in-from-right-4 duration-300">
+                        
+                        {/* 1. Name & Delete */}
+                        <div className="flex justify-between items-start gap-3 mb-4">
+                          <div className="flex-1">
+                            <label className="text-[9px] font-black text-slate-400 uppercase mb-1 block">Expense Name</label>
+                            <input 
+                              type="text" 
+                              placeholder="e.g. Brokerage" 
+                              value={item.name} 
+                              onChange={e => updateCustomExpense(item.id, 'name', e.target.value)} 
+                              className="w-full text-sm font-bold text-slate-800 outline-none placeholder:text-slate-200 bg-transparent border-b border-slate-50 focus:border-emerald-200 pb-1 transition-colors" 
+                            />
+                          </div>
+                          <button onClick={() => removeCustomExpense(item.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
 
-        {/* THE FANCY SLIDING BOX */}
-        <div className={`flex items-center transition-all duration-300 ease-in-out overflow-hidden ${addingToId === item.id ? 'w-32 opacity-100 ml-1' : 'w-0 opacity-0'}`}>
-  <div className="h-4 w-px bg-slate-300 mx-1" />
-  <div className="relative flex items-center">
-    <input 
-      type="number"
-      inputMode="decimal"
-      placeholder="+ Add"
-      autoFocus={addingToId === item.id}
-      className="w-20 bg-blue-50 border border-blue-200 rounded-l px-1 text-xs text-blue-700 outline-none font-bold h-8"
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') {
-          const extra = parseFloat(e.currentTarget.value) || 0;
-          updateCustomExpense(item.id, 'amount', ((Number(item.amount) || 0) + extra).toString());
-          setAddingToId(null);
-        }
-      }}
-      // Mobile logic: Saves if he just taps away
-      onBlur={(e) => {
-        const val = e.target.value;
-        if (val && val !== '0') {
-           updateCustomExpense(item.id, 'amount', ((Number(item.amount) || 0) + (parseFloat(val) || 0)).toString());
-        }
-        setAddingToId(null);
-      }}
-    />
-    {/* Small Checkmark for tapping on mobile */}
-    <button 
-      type="button"
-      className="bg-blue-600 text-white h-8 px-2 rounded-r flex items-center justify-center active:bg-blue-700"
-    >
-      <CheckCircle size={14} />
-    </button>
-  </div>
-</div>
+                        {/* 2. Base Date & Total Row */}
+                        <div className="grid grid-cols-2 gap-4 pb-4 border-b border-slate-50">
+                          <div>
+                            <label className="text-[9px] font-black text-slate-400 uppercase mb-1 block">Date</label>
+                            {/* THE FULL CLICKABLE WRAPPER */}
+                            <div className="relative w-full h-11 group/date">
+                               <input 
+                                  type="date" 
+                                  value={item.date || new Date().toISOString().split('T')[0]} 
+                                  onChange={e => updateCustomExpense(item.id, 'date', e.target.value)} 
+                                  onClick={(e) => { try { (e.target as HTMLInputElement).showPicker(); } catch(err) {} }}
+                                  className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" 
+                               />
+                               <div className="absolute inset-0 w-full h-full z-10 flex items-center justify-center gap-2 border border-slate-200 rounded-xl bg-slate-50 text-slate-700 pointer-events-none select-none group-hover/date:border-safety-500 transition-all">
+                                  <Calendar size={14} className="text-safety-600" />
+                                  <span className="text-[11px] font-bold pt-0.5">
+                                    {new Date(`${item.date || new Date().toISOString().split('T')[0]}T12:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                  </span>
+                               </div>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-[9px] font-black text-slate-400 uppercase mb-1 block text-right">Total (₹)</label>
+                            <div className="flex items-center justify-end bg-slate-900 text-emerald-400 px-3 h-11 rounded-xl shadow-inner">
+                              <input 
+                                type="text" 
+                                inputMode="decimal" 
+                                value={formatInputNumber(item.amount)} 
+                                onChange={e => updateCustomExpense(item.id, 'amount', e.target.value)} 
+                                className="w-full bg-transparent font-mono font-bold text-xs outline-none text-right" 
+                              />
+                            </div>
+                          </div>
+                        </div>
 
-        {/* Plus Button (Rotates to X when active) */}
-        <button 
-          type="button"
-          onClick={() => setAddingToId(addingToId === item.id ? null : item.id)}
-          className={`ml-1 p-1 rounded-md transition-all active:scale-90 ${addingToId === item.id ? 'bg-safety-500 text-white shadow-inner' : 'text-slate-400 hover:bg-slate-100'}`}
-        >
-          <Plus size={16} className={`transition-transform duration-300 ${addingToId === item.id ? 'rotate-45' : ''}`} />
-        </button>
-      </div>
+                        {/* 3. Add More Drawer */}
+                        <div className="mt-4">
+                          <div className="flex justify-end">
+                            <button 
+                              type="button"
+                              onClick={() => setAddingToId(addingToId === item.id ? null : item.id)}
+                              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black transition-all shadow-sm ${addingToId === item.id ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-blue-600'}`}
+                            >
+                              {addingToId === item.id ? 'CANCEL' : <><Plus size={14} /> ADD PAYMENT</>}
+                            </button>
+                          </div>
 
-      {/* Delete Row Button */}
-      <button 
-        onClick={() => removeCustomExpense(item.id)} 
-        className="text-red-300 hover:text-red-600 transition-colors p-1"
-      >
-        <Trash2 size={16} />
-      </button>
-    </div>
-  ))}
-</div>
-                   <button onClick={addCustomExpense} className="mt-2 text-xs flex items-center gap-1 bg-slate-100 px-3 py-1.5 rounded-full hover:bg-slate-200 font-bold text-slate-600 transition-colors">
-                      <Plus size={12} /> Add Expense
-                   </button>
+                          <div className={`grid transition-all duration-300 ease-in-out ${addingToId === item.id ? 'grid-rows-[1fr] opacity-100 mt-4' : 'grid-rows-[0fr] opacity-0 mt-0'}`}>
+                            <div className="overflow-hidden">
+                              <div className="bg-blue-50/50 border border-blue-100 rounded-2xl p-4 space-y-4">
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="text-[9px] font-black text-blue-400 uppercase ml-1 block mb-1">New Date</label>
+                                    <div className="relative w-full h-11 group/newdate">
+                                       <input 
+                                          type="date" 
+                                          id={`date-add-${item.id}`}
+                                          defaultValue={new Date().toISOString().split('T')[0]}
+                                          onClick={(e) => { try { (e.target as HTMLInputElement).showPicker(); } catch(err) {} }}
+                                          // Note: We'll use local state logic or the id selector as before
+                                          className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" 
+                                       />
+                                       <div className="absolute inset-0 w-full h-full z-10 flex items-center justify-center gap-2 border border-blue-100 rounded-xl bg-white text-blue-600 pointer-events-none select-none group-hover/newdate:border-blue-400 transition-all">
+                                          <Calendar size={14} />
+                                          <span className="text-[11px] font-bold pt-0.5">
+                                             {/* Displaying current date as default for the drawer view */}
+                                             {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                          </span>
+                                       </div>
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <label className="text-[9px] font-black text-blue-400 uppercase ml-1 block mb-1 text-right">Amount</label>
+                                    <input 
+                                      type="number"
+                                      placeholder="₹ 0.00"
+                                      id={`amt-add-${item.id}`}
+                                      className="w-full bg-white border border-blue-100 rounded-xl px-3 text-xs text-blue-700 outline-none font-bold h-11 shadow-sm"
+                                    />
+                                  </div>
+                                </div>
+                                <button 
+                                  type="button"
+                                  onClick={() => {
+                                    const dateInput = document.getElementById(`date-add-${item.id}`) as HTMLInputElement;
+                                    const dateVal = dateInput.value || new Date().toISOString().split('T')[0];
+                                    const amtVal = parseFloat((document.getElementById(`amt-add-${item.id}`) as HTMLInputElement).value) || 0;
+                                    if (amtVal > 0) {
+                                      const newHistory = [...(item.history || []), { date: dateVal, amount: amtVal }];
+                                      const newTotal = (Number(item.amount) || 0) + amtVal;
+                                      setOverheads(prev => ({
+                                        ...prev,
+                                        customExpenses: (prev.customExpenses || []).map(ex => 
+                                          ex.id === item.id ? { ...ex, amount: newTotal, history: newHistory } : ex
+                                        )
+                                      }));
+                                    }
+                                    setAddingToId(null);
+                                  }}
+                                  className="w-full bg-blue-600 text-white h-12 rounded-xl flex items-center justify-center gap-2 font-black text-xs tracking-widest active:scale-95 transition-all shadow-lg shadow-blue-200"
+                                >
+                                  <CheckCircle size={18} /> CONFIRM ADDITION
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
               </div>
@@ -877,7 +999,7 @@ const handleDpAmountChange = (val: string) => {
           </Card>
         </div>
 
-        {/* 5. Project Cost Sheet Summary */}
+        {/* 5. Project Cost Sheet Summary (Collapsible Version) */}
         <div className="md:col-span-12">
           <Card 
             title="5. Project Cost Sheet" 
@@ -893,53 +1015,84 @@ const handleDpAmountChange = (val: string) => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {/* Left: Breakdown */}
                 <div className="flex flex-col justify-center">
-                  <div className="space-y-3 text-sm">
-                    <div className="flex justify-between border-b border-slate-100 pb-2">
-                      <div className="text-slate-500 font-medium">Total Deal Price</div>
-                      <div className="text-right font-bold text-slate-900">{formatCurrency(calculatedDealPrice)}</div>
-                    </div>
-                    
-                    <div className="flex justify-between border-b border-slate-100 pb-2">
-                      <div className="text-slate-500 font-medium">Stamp Duty & Reg ({costSheetBasis}%)</div>
-                      <div className={`text-right font-bold ${costSheetBasis === '100' ? 'text-slate-900' : 'text-blue-600'}`}>{formatCurrency(currentStampDuty)}</div>
+                  <div className="space-y-4 text-sm">
+                    {/* Basic Costs */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between border-b border-slate-100 pb-2">
+                        <div className="text-slate-500 font-medium">Total Deal Price</div>
+                        <div className="text-right font-bold text-slate-900">{formatCurrency(calculatedDealPrice)}</div>
+                      </div>
+                      
+                      <div className="flex justify-between border-b border-slate-100 pb-2">
+                        <div className="text-slate-500 font-medium">Stamp Duty & Reg ({costSheetBasis}%)</div>
+                        <div className={`text-right font-bold ${costSheetBasis === '100' ? 'text-slate-900' : 'text-blue-600'}`}>{formatCurrency(currentStampDuty)}</div>
+                      </div>
                     </div>
 
-                    <div className="pl-4 border-l-2 border-safety-200 space-y-1 bg-orange-50/50 p-3 rounded-r-lg">
-                      <div className="flex justify-between text-xs text-slate-600 mb-1"><span>Additional Expenses</span><span className="font-medium">{formatCurrency(result.totalAdditionalExpenses)}</span></div>
-                      {getNum(overheads.architectFees) > 0 && <div className="flex justify-between text-xs text-slate-400 pl-2"><span>- Architect</span><span>{formatCurrency(Number(overheads.architectFees))}</span></div>}
-                      {getNum(overheads.planPassFees) > 0 && <div className="flex justify-between text-xs text-slate-400 pl-2"><span>- Plan Pass</span><span>{formatCurrency(Number(overheads.planPassFees))}</span></div>}
-                      {getNum(overheads.naExpense) > 0 && <div className="flex justify-between text-xs text-slate-400 pl-2"><span>- NA Exp</span><span>{formatCurrency(Number(overheads.naExpense))}</span></div>}
-                      {getNum(overheads.naPremium) > 0 && <div className="flex justify-between text-xs text-slate-400 pl-2"><span>- NA Prem</span><span>{formatCurrency(Number(overheads.naPremium))}</span></div>}
-                      {getNum(overheads.developmentCost) > 0 && <div className="flex justify-between text-xs text-slate-400 pl-2"><span>- Dev Cost</span><span>{formatCurrency(Number(overheads.developmentCost))}</span></div>}
-                      {/* Custom Expenses Display */}
-                      {(overheads.customExpenses || []).map(item => (
-                        getNum(item.amount) > 0 && (
-                          <div key={item.id} className="flex justify-between text-xs text-slate-400 pl-2">
-                            <span>- {item.name || 'Extra'}</span>
-                            <span>{formatCurrency(Number(item.amount))}</span>
+                    {/* Collapsible Additional Expenses Section */}
+                    <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden shadow-sm transition-all duration-300">
+                      <button 
+                        type="button"
+                        onClick={() => setShowExpenseBreakdown(!showExpenseBreakdown)}
+                        className="w-full flex justify-between items-center p-4 hover:bg-slate-100 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                           <div className={`p-1 rounded-md bg-white border border-slate-200 transition-transform duration-300 ${showExpenseBreakdown ? 'rotate-180' : ''}`}>
+                             <ArrowDown size={14} className="text-slate-500" />
+                           </div>
+                           <span className="text-xs font-bold text-slate-600 uppercase tracking-widest">Additional Expenses</span>
+                        </div>
+                        <span className="font-black text-slate-900">{formatCurrency(result.totalAdditionalExpenses)}</span>
+                      </button>
+
+                      {/* The Animated Dropdown List with Scrollbar */}
+                      <div className={`px-4 transition-all duration-300 ease-in-out overflow-hidden ${showExpenseBreakdown ? 'max-h-[250px] pb-4 opacity-100' : 'max-h-0 opacity-0'}`}>
+                        <div className="space-y-2 pt-2 border-t border-slate-200/50 overflow-y-auto max-h-[220px] pr-2 custom-scrollbar">
+                          {getNum(overheads.architectFees) > 0 && <div className="flex justify-between text-[11px] text-slate-500 pl-7"><span>Architect Fees</span><span className="font-mono">{formatCurrency(Number(overheads.architectFees))}</span></div>}
+                          {getNum(overheads.planPassFees) > 0 && <div className="flex justify-between text-[11px] text-slate-500 pl-7"><span>Plan Pass Fees</span><span className="font-mono">{formatCurrency(Number(overheads.planPassFees))}</span></div>}
+                          {getNum(overheads.naExpense) > 0 && <div className="flex justify-between text-[11px] text-slate-500 pl-7"><span>NA Expense</span><span className="font-mono">{formatCurrency(Number(overheads.naExpense))}</span></div>}
+                          {getNum(overheads.naPremium) > 0 && <div className="flex justify-between text-[11px] text-slate-500 pl-7"><span>NA Premium</span><span className="font-mono">{formatCurrency(Number(overheads.naPremium))}</span></div>}
+                          {getNum(overheads.developmentCost) > 0 && <div className="flex justify-between text-[11px] text-slate-500 pl-7"><span>Development Cost</span><span className="font-mono">{formatCurrency(Number(overheads.developmentCost))}</span></div>}
+                          
+                          {(overheads.customExpenses || []).map(item => (
+                            getNum(item.amount) > 0 && (
+                              <div key={item.id} className="flex justify-between text-[11px] text-slate-600 pl-7 border-l-2 border-slate-200 ml-1 py-1">
+                                <span>{item.name || 'Extra Item'}</span>
+                                <span className="font-bold font-mono">{formatCurrency(Number(item.amount))}</span>
+                              </div>
+                            )
+                          ))}
+                        </div>
+                        {/* Visual indicator for more items */}
+                        {showExpenseBreakdown && (overheads.customExpenses?.length || 0) > 5 && (
+                          <div className="text-center text-[9px] text-slate-300 font-bold uppercase mt-2 tracking-widest">
+                            Scroll to see more
                           </div>
-                        )
-                      ))}
+                        )}
+                      </div>
                     </div>
 
-                    <div className="flex justify-between items-center bg-slate-900 p-4 rounded-lg mt-4 shadow-lg shadow-slate-300 border border-slate-800 relative overflow-hidden">
-                      <div className="absolute inset-0 bg-slate-900"></div>
+                    {/* Total Box - Always Visible */}
+                    <div className="flex justify-between items-center bg-slate-900 p-4 rounded-xl mt-2 shadow-lg shadow-slate-200 border border-slate-800 relative overflow-hidden">
+                      <div className="absolute inset-0 bg-gradient-to-r from-slate-900 to-slate-800"></div>
                       <div className="text-white font-bold text-lg relative z-10">Total Project Cost</div>
-                      <div className="text-right font-bold text-2xl text-slate-200 relative z-10">{formatCurrency(currentLandedCost)}</div>
+                      <div className="text-right font-bold text-2xl text-emerald-400 relative z-10">{formatCurrency(currentLandedCost)}</div>
                     </div>
                   </div>
                 </div>
                 
                 {/* Right: Pie Chart */}
-                <div className="flex items-center justify-center bg-slate-50/50 rounded-xl border border-slate-100 p-2 min-h-[300px]">
+                <div className="flex items-center justify-center bg-white rounded-2xl border border-slate-100 p-4 shadow-inner min-h-[300px]">
                    <div className="w-full h-full flex flex-col">
-                      <div className="text-center text-[10px] font-bold text-slate-400 uppercase mb-2">Cost Distribution</div>
+                      <div className="text-center text-[10px] font-bold text-slate-400 uppercase mb-4 tracking-tighter">Investment Distribution</div>
                       <SummaryChart landCost={calculatedDealPrice} stampDuty={currentStampDuty} development={result.totalAdditionalExpenses} />
                    </div>
                 </div>
               </div>
             ) : (
-              <div className="text-center text-slate-400 py-8 italic">Enter details above to calculate cost sheet</div>
+              <div className="text-center text-slate-400 py-12 italic bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+                Complete land details to generate cost sheet
+              </div>
             )}
           </Card>
         </div>
@@ -1247,6 +1400,94 @@ const handleDpAmountChange = (val: string) => {
             )}
           </div>
       </div>
+      
+   {/* 🧾 EXPENSE LEDGER MODAL */}
+      {isLedgerOpen && (
+        <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center p-0 md:p-4 animate-in fade-in duration-300">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsLedgerOpen(false)}></div>
+          
+          <div className="relative bg-white w-full max-w-2xl h-[85vh] md:h-auto md:max-h-[85vh] rounded-t-[2.5rem] md:rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10 duration-400">
+            
+            {/* Modal Header */}
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10">
+              <div>
+                <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
+                  <Clock className="text-blue-500" /> Expense Ledger
+                </h2>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Full Transaction History</p>
+              </div>
+              <button onClick={() => setIsLedgerOpen(false)} className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 hover:text-red-500 transition-colors">
+                <Plus size={24} className="rotate-45" />
+              </button>
+            </div>
+
+            {/* Date Range Selectors (Using your approved big-target UI) */}
+            <div className="p-4 bg-slate-50 border-b border-slate-100 grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-400 uppercase ml-1">From</label>
+                <div className="relative h-11 group">
+                   <input type="date" value={ledgerRange.from} onChange={(e) => setLedgerRange({...ledgerRange, from: e.target.value})} onClick={(e) => { try { (e.target as any).showPicker(); } catch(err) {} }} className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" />
+                   <div className="absolute inset-0 w-full h-full z-10 flex items-center justify-center gap-2 border border-slate-200 rounded-xl bg-white text-slate-700 pointer-events-none group-hover:border-blue-400 transition-all">
+                      <Calendar size={14} className="text-blue-500" />
+                      <span className="text-xs font-bold">{new Date(`${ledgerRange.from}T12:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                   </div>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-400 uppercase ml-1 text-right block">To</label>
+                <div className="relative h-11 group">
+                   <input type="date" value={ledgerRange.to} onChange={(e) => setLedgerRange({...ledgerRange, to: e.target.value})} onClick={(e) => { try { (e.target as any).showPicker(); } catch(err) {} }} className="absolute inset-0 w-full h-full z-20 opacity-0 cursor-pointer [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0" />
+                   <div className="absolute inset-0 w-full h-full z-10 flex items-center justify-center gap-2 border border-slate-200 rounded-xl bg-white text-slate-700 pointer-events-none group-hover:border-blue-400 transition-all">
+                      <Calendar size={14} className="text-blue-500" />
+                      <span className="text-xs font-bold">{new Date(`${ledgerRange.to}T12:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Transactions List */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50">
+              {getFilteredLedger().length > 0 ? (
+                getFilteredLedger().map((t, idx) => (
+                  <div key={idx} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center shadow-sm">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-black text-blue-500 uppercase tracking-tighter">
+                        {new Date(`${t.date}T12:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </span>
+                      <span className="text-sm font-bold text-slate-800 mt-0.5">{t.name}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-xs font-black text-slate-900 block">{formatCurrency(t.amount)}</span>
+                      <span className="text-[9px] font-bold text-emerald-500 uppercase">Paid</span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="flex flex-col items-center justify-center py-20 text-slate-300">
+                  <Calculator size={48} className="opacity-10 mb-4" />
+                  <p className="font-bold text-sm">No expenses found for this range</p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-6 bg-white border-t border-slate-100 flex flex-col gap-4">
+              <div className="flex justify-between items-center px-2">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total for Period</span>
+                <span className="text-2xl font-black text-slate-900">
+                  {formatCurrency(getFilteredLedger().reduce((sum, t) => sum + t.amount, 0))}
+                </span>
+              </div>
+              <button 
+                onClick={() => alert("PDF Statement building...")}
+                className="w-full bg-slate-900 text-white h-14 rounded-2xl flex items-center justify-center gap-3 font-black text-sm tracking-widest shadow-xl shadow-slate-200 active:scale-95 transition-all"
+              >
+                <Download size={20} /> DOWNLOAD STATEMENT
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       
     </div>
   );
