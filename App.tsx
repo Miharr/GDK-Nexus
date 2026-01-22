@@ -7,7 +7,8 @@ import {
   Landmark, 
   Hexagon, 
   ArrowRight,
-  FolderOpen
+  FolderOpen,
+  LogOut
 } from 'lucide-react';
 import { Loader } from './components/Loader';
 import { LandDealStructurer } from './components/LandDealStructurer';
@@ -54,7 +55,6 @@ const App: React.FC = () => {
   }, []);
 
   // --- 🛡️ LAYER 1: THE PANIC TIMER (Emergency Reset) ---
-  // If the view stays on 'loading' for more than 4 seconds, force it back to dashboard
   useEffect(() => {
     let panicTimer: NodeJS.Timeout;
     if (currentView === 'loading') {
@@ -76,9 +76,7 @@ const App: React.FC = () => {
 
   // 🛡️ LAYER 2: DOUBLE-CLICK PROTECTION & TIMER MANAGEMENT
   const startLoadingTransition = (targetView: ViewState, delay = 2000) => {
-    if (currentView === 'loading') return; // Ignore if already loading
-    
-    // Clear any existing timer before starting a new one
+    if (currentView === 'loading') return; 
     if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
     
     setCurrentView('loading');
@@ -161,9 +159,11 @@ const App: React.FC = () => {
 
   if (!session) return <Auth />;
 
+  // Extract username from metadata
+  const userName = session?.user?.user_metadata?.display_name || 'Partner';
+
   return (
     <div className="min-h-screen w-full bg-[#F1F5F9] text-slate-800 font-sans overflow-hidden relative">
-      {/* 🛡️ LAYER 3: STABLE ANIMATION MODE */}
       <AnimatePresence mode="popLayout">
         
         {currentView === 'loading' && (
@@ -188,9 +188,9 @@ const App: React.FC = () => {
             exit={{ opacity: 0}}
             transition={{ duration: 0.2 }}
           >
-            <header className="flex justify-between items-center mb-16 md:mb-24">
+            <header className="flex justify-between items-start mb-16 md:mb-24">
               <div className="flex items-center gap-4 group cursor-default">
-                <div className="w-16 h-16 rounded-2xl bg-[#F1F5F9] shadow-[6px_6px_12px_#cbd5e1,-6px_-6px_12px_#ffffff] flex items-center justify-center border border-white/50">
+                <div className="w-16 h-16 rounded-2xl bg-[#F1F5F9] shadow-[6px_6px_12px_#cbd5e1,-6px_-6px_12px_#ffffff] flex items-center justify-center border border-white/50 transition-transform group-hover:scale-105 duration-300">
                   <Hexagon className="text-safety-500" size={32} />
                 </div>
                 <div>
@@ -200,11 +200,24 @@ const App: React.FC = () => {
                   <p className="text-xs text-slate-400 font-mono tracking-[0.3em] uppercase">Enterprise Command System</p>
                 </div>
               </div>
-              <div className="text-right flex flex-col items-end gap-2">
+
+              <div className="flex flex-col items-end gap-3">
+                <div className="text-right">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Verified Session</p>
+                  <h2 className="text-sm font-bold text-slate-700 flex items-center gap-2 justify-end">
+                    Hey, <span className="text-safety-500">{userName}</span>
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                    </span>
+                  </h2>
+                </div>
+                
                 <button 
                   onClick={handleSignOut}
-                  className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black text-slate-400 hover:text-red-500 transition-all shadow-sm active:scale-95 uppercase tracking-widest"
+                  className="group flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black text-slate-400 hover:text-red-500 hover:border-red-100 transition-all shadow-sm active:scale-95 uppercase tracking-widest"
                 >
+                  <LogOut size={12} className="group-hover:-translate-x-0.5 transition-transform" />
                   Sign Out
                 </button>
               </div>
