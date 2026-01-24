@@ -8,6 +8,7 @@ import {
   Calendar,
   FileText, 
   Calculator,
+  RefreshCw,
   RotateCcw,
   Download,
   ArrowRightLeft,
@@ -61,8 +62,9 @@ interface Props {
 export const LandDealStructurer: React.FC<Props> = ({ onBack, initialData, initialId }) => {
   
   // Fancy UI State for sliding input
-  const [addingToId, setAddingToId] = useState<string | null>(null);
-const [flashingId, setFlashingId] = useState<string | null>(null);
+const [addingToId, setAddingToId] = useState<string | null>(null);
+  const [flashingId, setFlashingId] = useState<string | null>(null);
+  const [expenseEntrySearch, setExpenseEntrySearch] = useState(''); // New search for the input section
   
   // --- STATE ---
   const [currentProjectId, setCurrentProjectId] = useState<number | null>(initialId || null);
@@ -107,8 +109,37 @@ const [flashingId, setFlashingId] = useState<string | null>(null);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
 
   // --- LEDGER & MODAL STATE ---
-  const [isLedgerOpen, setIsLedgerOpen] = useState(false);
-  const [tempAddDate, setTempAddDate] = useState(new Date().toISOString().split('T')[0]);
+const [isLedgerOpen, setIsLedgerOpen] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const refreshProjectData = async () => {
+    if (!currentProjectId) return;
+    setIsSyncing(true);
+    try {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('full_data')
+        .eq('id', currentProjectId)
+        .single();
+
+      if (error) throw error;
+
+      if (data?.full_data) {
+        const d = data.full_data as ProjectSavedState;
+        setIdentity(d.identity);
+        setMeasurements(d.measurements);
+        setFinancials(d.financials);
+        setOverheads(d.overheads);
+        setAnalysisUnit(d.analysisUnit);
+        setCostSheetBasis(d.costSheetBasis);
+      }
+    } catch (err) {
+      console.error('Refresh failed:', err);
+    } finally {
+      // Satisfying delay so the user sees the spin
+      setTimeout(() => setIsSyncing(false), 600);
+    }
+  };  const [tempAddDate, setTempAddDate] = useState(new Date().toISOString().split('T')[0]);
   const [ledgerRange, setLedgerRange] = useState({
     from: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0], // 1st of current month
     to: new Date().toISOString().split('T')[0] // Today
@@ -575,15 +606,20 @@ const handleDpAmountChange = (val: string) => {
               <button onClick={handleClear} title="Clear" className="p-1.5 md:p-2 text-slate-500 hover:text-red-500 transition-colors"><RotateCcw size={18} /></button>
             </div>
 
-            {/* Ledger Button */}
+           {/* Ledger Button (Auto-Saves before opening) */}
             <button 
-              onClick={() => setIsLedgerOpen(true)}
-              className="bg-white border border-slate-200 p-2 md:px-4 md:py-2 rounded-lg md:rounded-xl text-slate-700 flex items-center gap-2 shadow-sm active:scale-95 transition-all"
+              onClick={async () => {
+                await handleSaveProject(); // 💾 Save current state first
+                setIsLedgerOpen(true);     // 🧾 Then open ledger
+              }}
+              className="bg-white border border-slate-200 p-2 md:px-4 md:py-2 rounded-lg md:rounded-xl text-slate-700 flex items-center gap-2 shadow-sm active:scale-95 hover:border-blue-200 transition-all"
             >
-              <Clock size={18} className="text-blue-500" />
+              <div className="relative">
+                <Clock size={18} className="text-blue-500" />
+                
+              </div>
               <span className="hidden lg:inline text-xs font-bold uppercase tracking-wider">Ledger</span>
             </button>
-
             {/* PDF Button */}
             <button 
               onClick={handleDownloadPDF} 
@@ -878,16 +914,29 @@ const handleDpAmountChange = (val: string) => {
                 
                {/* 📂 MOBILE-FIRST EXPENSE CARDS (Ultra-Clickable Date Picker) */}
                 <div className="col-span-2 border-t border-slate-100 pt-5 mt-2">
-                  <div className="flex justify-between items-center mb-4 px-1">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Extra Expenses</label>
+                  {/* Search for editing rows */}
+                  <div className="mb-4">
+                    <input 
+                      type="text"
+                      placeholder="Find row 🔍"
+                      value={expenseEntrySearch}
+                      onChange={(e) => setExpenseEntrySearch(e.target.value)}
+                      className="w-full h-10 px-4 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:border-emerald-400 transition-all placeholder:text-slate-300"
+                    />
+                  </div>
+
+                  <div className="flex justify-between items-center mb-4 px-1">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Extra Expenses</label>
                     <button onClick={addCustomExpense} className="text-[10px] flex items-center gap-1 bg-emerald-50 text-emerald-700 px-3 py-2 rounded-xl hover:bg-emerald-100 font-black transition-all shadow-sm">
                       <Plus size={14} /> NEW ROW
                     </button>
                   </div>
 
                   <div className="space-y-4">
-                    {(overheads.customExpenses || []).map(item => (
-                      <div key={item.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm animate-in slide-in-from-right-4 duration-300">
+                    {(overheads.customExpenses || [])
+                      .filter(item => item.name.toLowerCase().includes(expenseEntrySearch.toLowerCase()))
+                      .map(item => (
+                      <div key={item.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm animate-in slide-in-from-right-4 duration-300">
                         
                         {/* 1. Name & Delete */}
                         <div className="flex justify-between items-start gap-3 mb-4">
@@ -1437,12 +1486,30 @@ const handleDpAmountChange = (val: string) => {
             
             {/* Modal Header */}
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10">
-              <div>
-                <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
-                  <Clock className="text-blue-500" /> Expense Ledger
-                </h2>
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Full Transaction History</p>
+              <div className="flex items-center gap-4">
+                <div>
+                  <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
+                    <Clock className="text-blue-500" /> Expense Ledger
+                  </h2>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">
+                  Synced: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </p>
+                </div>
+                
+                {/* 🚀 NEW SYNC BUTTON */}
+                <button 
+                  onClick={refreshProjectData}
+                  disabled={isSyncing}
+                  className="p-2.5 bg-slate-50 text-slate-400 hover:text-blue-600 rounded-xl transition-all active:scale-90 group"
+                  title="Sync Latest Data"
+                >
+                  <RefreshCw 
+                    size={18} 
+                    className={`${isSyncing ? 'animate-spin text-blue-600' : 'group-hover:rotate-180 duration-500'}`} 
+                  />
+                </button>
               </div>
+
               <button onClick={() => setIsLedgerOpen(false)} className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 hover:text-red-500 transition-colors">
                 <Plus size={24} className="rotate-45" />
               </button>

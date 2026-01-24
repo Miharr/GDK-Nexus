@@ -14,6 +14,8 @@ export const Auth: React.FC<AuthProps> = ({ forceRecovery, onPasswordUpdated }) 
   const [isUpdatingPassword, setIsUpdatingPassword] = useState(forceRecovery || false);
   const [showPassword, setShowPassword] = useState(false);
 const [status, setStatus] = useState<{ message: string; type: 'error' | 'success' } | null>(null);  
+const [isAdminPinMode, setIsAdminPinMode] = useState(false);
+  const [pin, setPin] = useState('');
   // Form States
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
@@ -43,9 +45,32 @@ const [status, setStatus] = useState<{ message: string; type: 'error' | 'success
       setIsResetMode(true);
     }
   }, [forceRecovery]);
+ const handleAdminPin = async (digit: string) => {
+    const newPin = pin + digit;
+    setPin(newPin);
 
-  // 2. Auth Logic
-  const handleAuth = async (e: React.FormEvent) => {
+    if (newPin.length === 4) {
+      if (newPin === '1234') { 
+        setLoading(true);
+        const { error } = await supabase.auth.signInWithPassword({ 
+          email: 'mihar1208@gmail.com', 
+          password: 'qwerty123' 
+        });
+        
+        if (error) {
+          setPin('');
+          setStatus({ message: "Admin Login Failed", type: 'error' });
+        }
+        setLoading(false);
+      } else {
+        setPin(''); 
+        setStatus({ message: "Wrong PIN", type: 'error' });
+      }
+    }
+  };
+
+  const handleAuth = async (e: React.FormEvent) => {
+    // ... rest of your existing code
   e.preventDefault();
   setLoading(true);
   setStatus(null);
@@ -258,28 +283,73 @@ const [status, setStatus] = useState<{ message: string; type: 'error' | 'success
             )}
           </button>
 
-          {/* Mode Switchers */}
-          {!isUpdatingPassword && (
-            <div className="pt-4 flex flex-col gap-3 items-center">
-              <button 
-                type="button"
-                onClick={() => {
-                  setIsSignUp(!isSignUp);
-                  setIsResetMode(false);
-                  setErrorMessage(null);
-                }} 
-                className="text-xs font-bold text-slate-500 hover:text-safety-500 transition-colors uppercase tracking-widest"
-              >
-                {isSignUp ? "Already have an account? Sign In" : "New user? Create account"}
-              </button>
-              
-              {isResetMode && (
-                <button type="button" onClick={() => setIsResetMode(false)} className="text-[10px] font-bold text-slate-300 uppercase underline">Back to Login</button>
-              )}
-            </div>
-          )}
-        </form>
-      </div>
-    </div>
-  );
+         {/* Mode Switchers */}
+          {!isUpdatingPassword && (
+            <div className="pt-4 flex flex-col gap-3 items-center">
+              <button 
+                type="button"
+                onClick={() => {
+                  setIsSignUp(!isSignUp);
+                  setIsResetMode(false);
+                  setStatus(null);
+                }} 
+                className="text-xs font-bold text-slate-500 hover:text-safety-500 transition-colors uppercase tracking-widest"
+              >
+                {isSignUp ? "Already have an account? Sign In" : "New user? Create account"}
+              </button>
+              
+              {isResetMode && (
+                <button type="button" onClick={() => setIsResetMode(false)} className="text-[10px] font-bold text-slate-300 uppercase underline">Back to Login</button>
+              )}
+            </div>
+          )}
+        </form>
+      </div> {/* ⬅️ THIS CLOSES THE WHITE CARD */}
+
+      {/* 🔐 SECRET ADMIN TRIGGER (Invisible button in bottom right corner) */}
+     {/* 🔐 ADMIN TRIGGER (Sleek Orange Bordered - No Glow) */}
+      <button 
+        onClick={() => {
+          setPin(''); 
+          setIsAdminPinMode(true);
+        }}
+        className="fixed bottom-10 right-10 w-12 h-12 bg-transparent border-2 border-orange-500 rounded-2xl flex items-center justify-center opacity-40 hover:opacity-100 hover:bg-orange-500 transition-all active:scale-95 group z-[99] cursor-pointer"
+        type="button"
+      >
+        <Lock size={18} className="text-orange-500 group-hover:text-white transition-colors" />
+      </button>
+
+      {/* 🔢 ADMIN PIN PAD OVERLAY */}
+      {isAdminPinMode && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/95 backdrop-blur-md flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="text-center mb-8">
+            <h2 className="text-white text-xs font-black tracking-[0.2em] uppercase opacity-50 mb-2">System Administrator</h2>
+            <h3 className="text-white text-xl font-bold">Enter Security PIN</h3>
+            
+            <div className="flex gap-4 mt-8 justify-center">
+              <div className="flex gap-4 mt-8 justify-center">
+  {[1, 2, 3, 4].map((_, i) => (
+    <div 
+      key={i} 
+      className={`w-3 h-3 rounded-full border-2 border-white/20 transition-all duration-200 ${
+        pin.length > i ? 'bg-safety-500 border-safety-500 scale-125 shadow-[0_0_10px_#ea580c]' : ''
+      }`} 
+    />
+  ))}
+</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-6">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+              <button key={num} onClick={() => handleAdminPin(num.toString())} className="w-16 h-16 rounded-full bg-white/5 border border-white/10 text-white font-bold text-xl active:bg-safety-500 active:scale-90 transition-all flex items-center justify-center">{num}</button>
+            ))}
+            <button onClick={() => setPin('')} className="w-16 h-16 rounded-full text-white/40 font-bold text-xs uppercase flex items-center justify-center">Clear</button>
+            <button onClick={() => handleAdminPin('0')} className="w-16 h-16 rounded-full bg-white/5 border border-white/10 text-white font-bold text-xl active:bg-safety-500 flex items-center justify-center">0</button>
+            <button onClick={() => setIsAdminPinMode(false)} className="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/20 text-red-500 font-bold text-xs uppercase flex items-center justify-center">Exit</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
