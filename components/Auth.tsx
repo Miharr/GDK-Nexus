@@ -50,7 +50,7 @@ const [isAdminPinMode, setIsAdminPinMode] = useState(false);
     setPin(newPin);
 
     if (newPin.length === 4) {
-      if (newPin === '1234') { 
+      if (newPin === '1208') { 
         setLoading(true);
         const { error } = await supabase.auth.signInWithPassword({ 
           email: 'mihar1208@gmail.com', 
@@ -352,4 +352,5 @@ const [isAdminPinMode, setIsAdminPinMode] = useState(false);
       )}
     </div>
   );
+
 };
