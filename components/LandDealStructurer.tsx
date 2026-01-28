@@ -83,11 +83,12 @@ const [addingToId, setAddingToId] = useState<string | null>(null);
 
   const [analysisUnit, setAnalysisUnit] = useState<UnitType>('Vigha');
 
-  const [financials, setFinancials] = useState<Financials>({
+const [financials, setFinancials] = useState<Financials & { priceBasis: 'Vigha' | 'Vaar' }>({
     pricePerVigha: '', 
+    priceBasis: 'Vigha', // Default to Vigha
     totalDealPrice: 0, 
     downPaymentPercent: '', 
-    downPaymentAmount: '', 
+    downPaymentAmount: '',
     downPaymentDurationMonths: 3, 
     totalDurationMonths: 24, 
     numberOfInstallments: 4, 
@@ -184,9 +185,11 @@ const [isLedgerOpen, setIsLedgerOpen] = useState(false);
     const totalJantriValue = totalSqMt * jantriRate;
     const fpJantriValue = fpAreaSqMt * jantriRate;
 
-    // 4. Deal Price
-    const pricePerVigha = getNum(financials.pricePerVigha);
-    const calculatedDealPrice = pricePerVigha * valInVigha;
+   // 4. Deal Price Logic
+    const priceInput = getNum(financials.pricePerVigha);
+    const calculatedDealPrice = financials.priceBasis === 'Vigha' 
+      ? priceInput * valInVigha 
+      : priceInput * (valInVigha * CONVERSION_RATES.Vaar * 0.60);
     
     // 5. Financials (Use State directly, handlers keep them synced)
     const effectiveDpAmount = getNum(financials.downPaymentAmount);
@@ -560,7 +563,10 @@ const handleDpAmountChange = (val: string) => {
   };
 
   const getNum = (val: number | string) => (val === '' ? 0 : Number(val));
-  const calculatedDealPrice = getNum(financials.pricePerVigha) * (result?.inputInVigha || 0);
+  const calculatedDealPrice = financials.priceBasis === 'Vigha'
+    ? getNum(financials.pricePerVigha) * (result?.inputInVigha || 0)
+    : getNum(financials.pricePerVigha) * ((result?.inputInVigha || 0) * CONVERSION_RATES.Vaar * 0.60);
+    
   const calculatedStampDuty = (result?.totalJantriValue || 0) * (getNum(overheads.stampDutyPercent) / 100);
   const convertValue = (valInVigha: number, unit: UnitType) => valInVigha * CONVERSION_RATES[unit];
 
@@ -768,7 +774,21 @@ const handleDpAmountChange = (val: string) => {
           <Card title="3. Deal Structure" icon={<IndianRupee size={20} />} className="h-full">
             <div className="space-y-6">
               <div>
-                <label className={labelClass}>Price Per Vigha</label>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className={labelClass}>Price Per {financials.priceBasis}</label>
+                  <div className="flex bg-slate-100 p-1 rounded-xl scale-90 origin-right">
+                    <button 
+                      type="button"
+                      onClick={() => setFinancials({...financials, priceBasis: 'Vigha'})}
+                      className={`px-3 py-1 text-[10px] font-black rounded-lg transition-all ${financials.priceBasis === 'Vigha' ? 'bg-safety-500 text-white shadow-sm' : 'text-slate-400'}`}
+                    >VIGHA</button>
+                    <button 
+                      type="button"
+                      onClick={() => setFinancials({...financials, priceBasis: 'Vaar'})}
+                      className={`px-3 py-1 text-[10px] font-black rounded-lg transition-all ${financials.priceBasis === 'Vaar' ? 'bg-safety-500 text-white shadow-sm' : 'text-slate-400'}`}
+                    >VAAR (60%)</button>
+                  </div>
+                </div>
                 <input 
                   type="text" 
                   inputMode="decimal"
@@ -776,7 +796,7 @@ const handleDpAmountChange = (val: string) => {
                   value={formatInputNumber(financials.pricePerVigha)} 
                   onChange={e => handlePricePerVighaChange(e.target.value)} 
                   className={`${inputClass} font-bold text-lg text-safety-600`} 
-                  placeholder="Enter Rate" 
+                  placeholder={`Enter Rate per ${financials.priceBasis}`} 
                 />
               </div>
 
@@ -1315,8 +1335,8 @@ const handleDpAmountChange = (val: string) => {
                 <div style={{ marginBottom: '30px', pageBreakInside: 'avoid' }}>
                    <h3 style={{ fontSize: '13px', fontWeight: 'bold', borderBottom: '1px solid #9ca3af', paddingBottom: '5px', marginBottom: '10px', color: '#000000', textTransform: 'uppercase' }}>B. Deal Structure</h3>
                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', backgroundColor: '#f3f4f6', padding: '15px', borderRadius: '6px' }}>
-                      <div style={{ flex: '1 1 40%' }}>
-                         <div style={{ fontSize: '9px', color: '#333333' }}>Price Per Vigha</div>
+                     <div style={{ flex: '1 1 40%' }}>
+                         <div style={{ fontSize: '9px', color: '#333333' }}>Price Per {financials.priceBasis} {financials.priceBasis === 'Vaar' ? '(60% Land)' : ''}</div>
                          <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#000000' }}>{formatCurrency(Number(financials.pricePerVigha))}</div>
                       </div>
                       <div style={{ flex: '1 1 40%' }}>

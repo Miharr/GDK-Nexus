@@ -1287,12 +1287,44 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
                                                 {isPaid && <div className="text-[10px] font-bold text-emerald-600 flex items-center gap-1 mt-1 pl-1"><CheckCircle2 size={10}/> Pd: {displayDate(item.paymentDate || '')}</div>}
                                             </div>
 
-                                           {/* Amounts + Running Balance */}
-                                           <div className="w-full md:w-48 flex justify-between md:block text-right">
-                                                <span className="md:hidden text-xs font-bold text-slate-400">Due:</span>
-                                                <div className="font-bold text-slate-600">{formatCurrency(item.expectedAmount)}</div>
-                                                {item.isPaid && <div className="text-[10px] font-bold text-emerald-600 mt-1">Pd: {formatCurrency(Number(item.paidAmount))}</div>}
-                                                <div className="text-[10px] font-mono text-slate-400 mt-1 border-t border-slate-200 pt-1">Bal: {isPaid ? formatCurrency(displayBalance) : '-'}</div>
+                                           {/* Amounts + Running Balance (Fixed: Two-Row Mobile Stack) */}
+                                            <div className="w-full md:w-52">
+                                                {/* 📱 MOBILE VIEW: Stacked rows to prevent overlapping */}
+                                                <div className="md:hidden space-y-2 bg-slate-50/80 p-3 rounded-xl border border-slate-100 mb-3">
+                                                    
+                                                    {/* Row 1: Due & Paid (Side by side) */}
+                                                    <div className="flex justify-between items-center border-b border-slate-200/50 pb-1.5">
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">Amount Due</span>
+                                                            <span className="text-[11px] font-bold text-slate-500 font-mono">{formatCurrency(item.expectedAmount)}</span>
+                                                        </div>
+                                                        <div className="flex flex-col text-right">
+                                                            <span className="text-[8px] font-black text-emerald-600 uppercase tracking-tighter">Amount Paid</span>
+                                                            <span className="text-[11px] font-bold text-emerald-700 font-mono">
+                                                                {isPaid ? formatCurrency(Number(item.paidAmount)) : '₹0'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Row 2: Balance (The Hero - Large & Bold) */}
+                                                    <div className="flex justify-between items-end pt-0.5">
+                                                        <span className="text-[10px] font-black text-orange-600 uppercase tracking-widest pb-1">Current Balance</span>
+                                                        <div className="text-right">
+                                                            <span className="text-lg font-black text-slate-900 tracking-tighter leading-none font-mono">
+                                                                {isPaid ? formatCurrency(displayBalance) : '—'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* 💻 DESKTOP VIEW: Clean standard layout */}
+                                                <div className="hidden md:block text-right">
+                                                    <div className="font-bold text-slate-600 text-sm">{formatCurrency(item.expectedAmount)}</div>
+                                                    {isPaid && <div className="text-[10px] font-bold text-emerald-600 mt-1">Pd: {formatCurrency(Number(item.paidAmount))}</div>}
+                                                    <div className="text-[10px] font-mono text-slate-400 mt-1 border-t border-slate-200 pt-1">
+                                                        Bal: {isPaid ? formatCurrency(displayBalance) : '-'}
+                                                    </div>
+                                                </div>
                                             </div>
 
                                             <button onClick={() => isPaid ? undoPayment(idx) : setActivePaymentRow(isEditing ? null : idx)} className={`w-full md:w-auto px-4 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition-all ${isPaid ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-slate-900 text-white shadow-lg hover:bg-black'}`}>
@@ -1324,8 +1356,10 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
                         <div className="grid grid-cols-3 gap-2 text-center">
                             <div className="bg-white rounded p-2 border border-slate-200"><div className="text-[10px] text-slate-400 uppercase font-bold">Total Deal</div><div className="text-sm font-bold text-slate-800">{formatCurrency(netTotalValue)}</div></div>
                             <div className="bg-emerald-50 rounded p-2 border border-emerald-100"><div className="text-[10px] text-emerald-600 uppercase font-bold">Total Paid</div><div className="text-sm font-bold text-emerald-700">{formatCurrency(totalPaid)}</div></div>
-                            <div className="bg-orange-50 rounded p-2 border border-orange-100"><div className="text-[10px] text-orange-600 uppercase font-bold">Balance Due</div><div className="text-sm font-bold text-orange-700">{formatCurrency(balanceDue)}</div></div>
-                        </div>
+<div className="bg-orange-50 rounded p-2 border border-orange-100 flex flex-col justify-center">
+    <div className="text-[9px] text-orange-600 uppercase font-black tracking-tighter">Balance Due</div>
+    <div className="text-base font-black text-orange-700 tracking-tighter leading-none">{formatCurrency(balanceDue)}</div>
+</div>                        </div>
                     </div>
 
                     <div className="p-4 bg-white border-t border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4">
