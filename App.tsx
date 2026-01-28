@@ -163,7 +163,10 @@ const App: React.FC = () => {
   const userName = session?.user?.user_metadata?.display_name || 'Partner';
 
   return (
-    <div className="min-h-screen w-full bg-[#F1F5F9] text-slate-800 font-sans overflow-hidden relative">
+    <div 
+      className="min-h-screen w-full bg-[#F1F5F9] text-slate-800 font-sans overflow-hidden relative"
+      style={{ overscrollBehaviorY: 'contain' }}
+    >
       <AnimatePresence mode="popLayout">
         
         {currentView === 'loading' && (
