@@ -501,14 +501,32 @@ const handleClear = () => {
   };
 
 const handleDpAmountChange = (val: string) => {
-    const amt = parseInputNumber(val);
-    const totalDeal = (Number(financials.pricePerVigha) || 0) * (result?.inputInVigha || 0);
-    let pct: number | '' = '';
-    if (totalDeal > 0 && amt !== '') {
-        pct = parseFloat(((amt / totalDeal) * 100).toFixed(2));
-    }
-    setFinancials(prev => ({ ...prev, downPaymentAmount: amt, downPaymentPercent: pct }));
-  };
+  const amt = parseInputNumber(val);
+  
+  // 1. Get the base area in Vigha
+  const vighaArea = result?.inputInVigha || 0;
+
+  // 2. Determine the pricing area (100% for Vigha, 60% for Vaar)
+  const pricingArea = financials.priceBasis === 'Vigha' 
+    ? vighaArea 
+    : (vighaArea * CONVERSION_RATES.Vaar * 0.60);
+
+  // 3. Calculate Total Deal Price based on the current basis
+  const totalDeal = (Number(financials.pricePerVigha) || 0) * pricingArea;
+  
+  let pct: number | '' = '';
+  
+  if (totalDeal > 0 && amt !== '') {
+    // 4. Calculate PCT against the relevant deal price
+    pct = parseFloat(((Number(amt) / totalDeal) * 100).toFixed(2));
+  }
+
+  setFinancials(prev => ({ 
+    ...prev, 
+    downPaymentAmount: amt, 
+    downPaymentPercent: pct 
+  }));
+};
 
   // Custom Expense Handlers
   // New State for Section 5 visibility
