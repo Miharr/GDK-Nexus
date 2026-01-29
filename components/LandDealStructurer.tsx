@@ -455,15 +455,20 @@ const handleClear = () => {
   const handlePricePerVighaChange = (val: string) => {
     const rawPrice = parseInputNumber(val);
     
-    // Recalculate Deal Price for immediate dependent updates
+    // 1. Calculate the correct area based on the Price Basis (Vigha vs Vaar 60%)
     let vighaArea = 0;
     const inputArea = Number(measurements.areaInput);
     if (measurements.inputUnit === 'Vigha') vighaArea = inputArea;
     else vighaArea = inputArea / CONVERSION_RATES[measurements.inputUnit];
 
-    const newDealPrice = (rawPrice === '' ? 0 : rawPrice) * vighaArea;
+    // If Vaar is selected, the area used for pricing is 60% of total land
+    const pricingArea = financials.priceBasis === 'Vigha' 
+      ? vighaArea 
+      : (vighaArea * CONVERSION_RATES.Vaar * 0.60);
 
-    // Update DP Amount if PCT is set
+    const newDealPrice = (rawPrice === '' ? 0 : rawPrice) * pricingArea;
+
+    // 2. Update DP Amount if Percent is already set
     const pct = Number(financials.downPaymentPercent);
     const newDpAmount = (financials.downPaymentPercent !== '' && rawPrice !== '') 
       ? newDealPrice * (pct / 100) 
@@ -476,9 +481,16 @@ const handleClear = () => {
     }));
   };
 
-  const handleDpPercentChange = (val: string) => {
+ const handleDpPercentChange = (val: string) => {
     const pct = parseInputNumber(val);
-    const totalDeal = (Number(financials.pricePerVigha) || 0) * (result?.inputInVigha || 0);
+    
+    // Calculate effective deal price based on basis
+    const vighaArea = result?.inputInVigha || 0;
+    const pricingArea = financials.priceBasis === 'Vigha' 
+      ? vighaArea 
+      : (vighaArea * CONVERSION_RATES.Vaar * 0.60);
+
+    const totalDeal = (Number(financials.pricePerVigha) || 0) * pricingArea;
     const amt = pct !== '' ? totalDeal * (pct / 100) : '';
     
     setFinancials(prev => ({ 
@@ -778,15 +790,32 @@ const handleDpAmountChange = (val: string) => {
                   <label className={labelClass}>Price Per {financials.priceBasis}</label>
                   <div className="flex bg-slate-100 p-1 rounded-xl scale-90 origin-right">
                     <button 
-                      type="button"
-                      onClick={() => setFinancials({...financials, priceBasis: 'Vigha'})}
-                      className={`px-3 py-1 text-[10px] font-black rounded-lg transition-all ${financials.priceBasis === 'Vigha' ? 'bg-safety-500 text-white shadow-sm' : 'text-slate-400'}`}
-                    >VIGHA</button>
-                    <button 
-                      type="button"
-                      onClick={() => setFinancials({...financials, priceBasis: 'Vaar'})}
-                      className={`px-3 py-1 text-[10px] font-black rounded-lg transition-all ${financials.priceBasis === 'Vaar' ? 'bg-safety-500 text-white shadow-sm' : 'text-slate-400'}`}
-                    >VAAR (60%)</button>
+  type="button"
+  onClick={() => {
+    // 1. Update Basis
+    const newBasis = 'Vigha';
+    const vighaArea = result?.inputInVigha || 0;
+    const newDealPrice = (Number(financials.pricePerVigha) || 0) * vighaArea;
+    const newDpAmt = financials.downPaymentPercent !== '' ? newDealPrice * (Number(financials.downPaymentPercent) / 100) : financials.downPaymentAmount;
+
+    setFinancials({...financials, priceBasis: newBasis, downPaymentAmount: newDpAmt});
+  }}
+  className={`px-3 py-1 text-[10px] font-black rounded-lg transition-all ${financials.priceBasis === 'Vigha' ? 'bg-safety-500 text-white shadow-sm' : 'text-slate-400'}`}
+>VIGHA</button>
+
+<button 
+  type="button"
+  onClick={() => {
+    // 1. Update Basis
+    const newBasis = 'Vaar';
+    const pricingArea = (result?.inputInVigha || 0) * CONVERSION_RATES.Vaar * 0.60;
+    const newDealPrice = (Number(financials.pricePerVigha) || 0) * pricingArea;
+    const newDpAmt = financials.downPaymentPercent !== '' ? newDealPrice * (Number(financials.downPaymentPercent) / 100) : financials.downPaymentAmount;
+
+    setFinancials({...financials, priceBasis: newBasis, downPaymentAmount: newDpAmt});
+  }}
+  className={`px-3 py-1 text-[10px] font-black rounded-lg transition-all ${financials.priceBasis === 'Vaar' ? 'bg-safety-500 text-white shadow-sm' : 'text-slate-400'}`}
+>VAAR (60%)</button>
                   </div>
                 </div>
                 <input 
