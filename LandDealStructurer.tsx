@@ -40,10 +40,8 @@ import {
   formatInputNumber,
   parseInputNumber
 } from '../utils/formatters';
+import { addPdfFooter, addPdfHeader, createPdfDoc, pdfTableDefaults } from '../utils/pdf';
 import { supabase } from '../supabaseClient';
-
-// Declare html2pdf for TypeScript
-declare var html2pdf: any;
 
 const CONVERSION_RATES = {
   Vigha: 1,
@@ -405,51 +403,127 @@ const handleClear = () => {
   };
 
  const handleDownloadPDF = () => {
-    const element = document.getElementById('pdf-template');
-    if (!element) return;
-    
-    // Ensure specific print styles are applied
-    element.style.display = 'block'; 
+    if (!result) return;
+    const doc = createPdfDoc('portrait');
+    if (!doc) return;
     
     const villageName = identity.village ? identity.village.replace(/\s+/g, '_') : 'Village';
     const fpNumber = identity.fpNumber ? identity.fpNumber.replace(/\s+/g, '') : 'FP';
+    const currentLandedCost = costSheetBasis === '100' ? result.landedCost100 : result.landedCost60;
+    const currentStampDuty = costSheetBasis === '100' ? result.stampDuty100 : result.stampDuty60;
+    const currentJantriDisplay = costSheetBasis === '100' ? result.totalJantriValue : result.fpJantriValue;
+    const getNum = (val: number | string) => (val === '' ? 0 : Number(val));
+    const calculatedDealPrice = getNum(financials.pricePerVigha) * (
+      financials.priceBasis === 'Vaar'
+        ? result.inputInVigha * CONVERSION_RATES.Vaar * 0.60
+        : result.inputInVigha
+    );
 
-    const opt = {
-      margin: [0.3, 0.3, 0.3, 0.3], // Top, Left, Bottom, Right
-      filename: `GDK_NEXUS_${villageName}_FP${fpNumber}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['avoid-all', 'css', 'legacy'], avoid: ['tr', '.pdf-row', '.pdf-card'] } // Smart pagination avoids cutting tables/text
-    };
+    addPdfHeader(doc, 'GDK NEXUS LAND COST SHEET', `Project: ${identity.village || 'Unnamed Project'} | TP: ${identity.tpScheme || '-'} | FP: ${identity.fpNumber || '-'}`);
 
-    html2pdf().set(opt).from(element).save().then(() => {
-       element.style.display = 'none'; 
+    (doc as any).autoTable({
+      ...pdfTableDefaults,
+      startY: 78,
+      margin: { left: 40, right: 40 },
+      head: [['Project Identity', 'Value']],
+      body: [
+        ['Village', identity.village || '-'],
+        ['TP Scheme', identity.tpScheme || '-'],
+        ['FP Number', identity.fpNumber || '-'],
+        ['Block / Survey Number', identity.blockSurveyNumber || '-'],
+      ],
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 170 } },
     });
+
+    (doc as any).autoTable({
+      ...pdfTableDefaults,
+      startY: ((doc as any).lastAutoTable?.finalY || 130) + 18,
+      margin: { left: 40, right: 40 },
+      head: [['Land / Jantri Metrics', 'Value']],
+      body: [
+        ['Input Area', `${formatInputNumber(measurements.areaInput)} ${measurements.inputUnit}`],
+        ['Total Area', `${formatInputNumber(result.totalSqMt)} SqMt / ${formatInputNumber(result.inputInVigha)} Vigha`],
+        ['FP Area (60%)', `${formatInputNumber(result.fpAreaSqMt)} SqMt / ${formatInputNumber(result.fpInVigha)} Vigha`],
+        ['Jantri Rate', `${formatCurrency(getNum(measurements.jantriRate))} / SqMt`],
+        [`Jantri Value (${costSheetBasis}% basis)`, formatCurrency(currentJantriDisplay)],
+      ],
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 170 } },
+    });
+
+    const costRows = [
+      ['Land Deal Price', formatCurrency(calculatedDealPrice)],
+      [`Stamp Duty & Registration (${costSheetBasis}% basis)`, formatCurrency(currentStampDuty)],
+      ['Architect Fees', formatCurrency(getNum(overheads.architectFees))],
+      ['Plan Pass Fees', formatCurrency(getNum(overheads.planPassFees))],
+      ['NA Expense', formatCurrency(getNum(overheads.naExpense))],
+      ['NA Premium', formatCurrency(getNum(overheads.naPremium))],
+      ['Development Cost', formatCurrency(getNum(overheads.developmentCost))],
+      ...(overheads.customExpenses || []).map((item: any) => [item.name || 'Extra Expense', formatCurrency(getNum(item.amount))]),
+    ].filter((row) => row[1] !== formatCurrency(0));
+
+    (doc as any).autoTable({
+      ...pdfTableDefaults,
+      startY: ((doc as any).lastAutoTable?.finalY || 250) + 18,
+      margin: { left: 40, right: 40 },
+      head: [['Cost Breakdown', 'Amount']],
+      body: costRows,
+      foot: [['Final Project Cost', formatCurrency(currentLandedCost)]],
+      showFoot: 'lastPage',
+      columnStyles: { 0: { cellWidth: 330 }, 1: { halign: 'right' } },
+    });
+
+    (doc as any).autoTable({
+      ...pdfTableDefaults,
+      startY: ((doc as any).lastAutoTable?.finalY || 380) + 18,
+      margin: { left: 40, right: 40 },
+      head: [['#', 'Description', 'Due Date', 'Amount']],
+      body: result.schedule.map((item, index) => [
+        `${index + 1}`,
+        item.description,
+        item.date,
+        formatCurrency(item.amount),
+      ]),
+      foot: [['', 'Total Payable to Land Owner', '', formatCurrency(result.grandTotalPayment)]],
+      showFoot: 'lastPage',
+      columnStyles: { 0: { cellWidth: 35 }, 3: { halign: 'right' } },
+    });
+
+    addPdfFooter(doc);
+    doc.save(`GDK_NEXUS_${villageName}_FP${fpNumber}.pdf`);
  };
 
   const handleDownloadLedgerPDF = () => {
-    const element = document.getElementById('ledger-pdf-template');
-    if (!element) return;
-    
-    element.style.display = 'block'; 
+    const doc = createPdfDoc('portrait');
+    if (!doc) return;
     
     const villageName = identity.village ? identity.village.replace(/\s+/g, '_') : 'Village';
     const fromDate = new Date(ledgerRange.from).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
     const toDate = new Date(ledgerRange.to).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    const transactions = getFilteredLedger();
+    const total = transactions.reduce((sum, item) => sum + item.amount, 0);
 
-    const opt = {
-      margin: [0.5, 0.5, 0.5, 0.5],
-      filename: `LEDGER_${villageName}_${fromDate}_to_${toDate}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['avoid-all', 'css', 'legacy'], avoid: ['tr', '.pdf-row', '.pdf-card'] }
-    };
+    addPdfHeader(doc, 'EXPENSE LEDGER STATEMENT', `Project: ${identity.village || 'Unnamed Project'} | Period: ${fromDate} to ${toDate}`);
 
-    html2pdf().set(opt).from(element).save().then(() => {
-       element.style.display = 'none'; 
+    (doc as any).autoTable({
+      ...pdfTableDefaults,
+      startY: 78,
+      margin: { left: 40, right: 40 },
+      head: [['Date', 'Description / Expense Name', 'Amount']],
+      body: transactions.map((item) => [
+        new Date(`${item.date}T12:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+        item.name,
+        formatCurrency(item.amount),
+      ]),
+      foot: [['', 'Grand Total for Period', formatCurrency(total)]],
+      showFoot: 'lastPage',
+      columnStyles: {
+        0: { cellWidth: 100 },
+        2: { halign: 'right', cellWidth: 110 },
+      },
     });
+
+    addPdfFooter(doc);
+    doc.save(`LEDGER_${villageName}_${fromDate}_to_${toDate}.pdf`);
   };
 
   // Reactive Handlers

@@ -23,10 +23,8 @@ import {
 } from 'lucide-react';
 import { ProjectSavedState } from '../types';
 import { formatCurrency, formatInputNumber, parseInputNumber } from '../utils/formatters';
+import { addPdfFooter, addPdfHeader, createPdfDoc, pdfTableDefaults } from '../utils/pdf';
 import { supabase } from '../supabaseClient';
-
-// Declare html2pdf for TypeScript
-declare var html2pdf: any;
 
 const CONVERSION_RATES: any = {
   Vigha: 1,
@@ -176,24 +174,140 @@ const [showReportPreview, setShowReportPreview] = useState(false);
     }
   };
 
-  // --- NEW: GENERATE PROJECT REPORT ---
   const handleGenerateProjectReport = () => {
-    const element = document.getElementById('project-report-template');
-    if (!element) return;
-    element.style.display = 'block';
+    const doc = createPdfDoc('landscape');
+    if (!doc) return;
 
-    const opt = {
-      margin: [0.3, 0.3, 0.3, 0.3],
-      filename: `Project_Report_${projectData.identity.village}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-      jsPDF: { unit: 'in', format: 'a4', orientation: 'landscape' }, // Landscape for wide table
-      pagebreak: { mode: ['avoid-all', 'css', 'legacy'], avoid: ['tr', '.pdf-row', '.pdf-card'] }
-    };
+    const m = projectData.measurements;
+    let baseVal = 0;
+    let baseUnit = 'Vaar';
+    if (m.plottedArea && Number(m.plottedArea) > 0) {
+      baseVal = Number(m.plottedArea);
+      baseUnit = m.plottedUnit || 'Vaar';
+    } else {
+      const inputVal = Number(m.areaInput) || 0;
+      const valInVigha = m.inputUnit === 'Vigha' ? inputVal : inputVal / CONVERSION_RATES[m.inputUnit || 'Vigha'];
+      baseVal = valInVigha * 0.60;
+      baseUnit = 'Vigha';
+    }
 
-    html2pdf().set(opt).from(element).save().then(() => {
-       element.style.display = 'none'; 
+    const areaInVaar = baseVal * (CONVERSION_RATES.Vaar / CONVERSION_RATES[baseUnit]);
+    const projectEstSale = areaInVaar * ((Number(data.landRate) || 0) + (Number(data.devRate) || 0));
+    const sortedPlots = [...filteredPlots].sort((a: any, b: any) => String(a.plotNumber || '').localeCompare(String(b.plotNumber || ''), undefined, { numeric: true }));
+
+    let gTotalGross = 0;
+    let gTotalComm = 0;
+    let gTotalNet = 0;
+    let gTotalRec = 0;
+    let gTotalPend = 0;
+
+    const rows = sortedPlots.map((plot: any) => {
+      const area = Number(plot.areaVaar) || 0;
+      const pLandRate = Number(plot.customLandRate) || landRate;
+      const grossVal = area * (pLandRate + devRate);
+      const landVal = area * pLandRate;
+      const deal = plot.dealStructure || {};
+      const commission = deal.agentCommissionType === 'percent'
+        ? Math.round(landVal * ((Number(deal.agentCommission) || 0) / 100))
+        : (Number(deal.agentCommission) || 0);
+      const netVal = grossVal - commission;
+      const received = (deal.schedule || []).reduce((sum: number, item: any) => sum + (item.isPaid ? Number(item.paidAmount) : 0), 0);
+      const pending = netVal - received;
+
+      gTotalGross += grossVal;
+      gTotalComm += commission;
+      gTotalNet += netVal;
+      gTotalRec += received;
+      gTotalPend += pending;
+
+      return [
+        `#${plot.plotNumber}`,
+        `${plot.customerName || '-'}\n${plot.phoneNumber || '-'}`,
+        `${formatInputNumber(area)} Vaar`,
+        formatCurrency(grossVal),
+        commission > 0 ? formatCurrency(commission) : '-',
+        formatCurrency(netVal),
+        formatCurrency(received),
+        formatCurrency(pending),
+      ];
     });
+
+    addPdfHeader(doc, `PROJECT SALES REPORT: ${projectData.identity.village}`, `Estimated sale: ${formatCurrency(projectEstSale)} | Sold gross: ${formatCurrency(gTotalGross)} | Unsold value: ${formatCurrency(projectEstSale - gTotalGross)}`);
+    (doc as any).autoTable({
+      ...pdfTableDefaults,
+      startY: 78,
+      margin: { left: 28, right: 28 },
+      head: [['Plot', 'Customer', 'Size', 'Gross Value', 'Commission', 'Net Deal', 'Received', 'Pending']],
+      body: rows,
+      foot: [['Grand Totals', '', '', formatCurrency(gTotalGross), formatCurrency(gTotalComm), formatCurrency(gTotalNet), formatCurrency(gTotalRec), formatCurrency(gTotalPend)]],
+      showFoot: 'lastPage',
+      columnStyles: {
+        0: { cellWidth: 42 },
+        1: { cellWidth: 140 },
+        2: { halign: 'right' },
+        3: { halign: 'right' },
+        4: { halign: 'right' },
+        5: { halign: 'right' },
+        6: { halign: 'right' },
+        7: { halign: 'right' },
+      },
+    });
+    addPdfFooter(doc);
+    doc.save(`Project_Report_${projectData.identity.village}.pdf`);
+  };
+
+  const handleGenerateCollectionStatement = () => {
+    const doc = createPdfDoc('portrait');
+    if (!doc) return;
+
+    const payments: any[] = [];
+    plots.forEach((plot: any) => {
+      (plot.dealStructure?.schedule || []).forEach((installment: any) => {
+        if (installment.isPaid && installment.paymentDate >= collectionDates.from && installment.paymentDate <= collectionDates.to) {
+          payments.push({
+            ...installment,
+            plotNumber: plot.plotNumber,
+            customerName: plot.customerName,
+            phoneNumber: plot.phoneNumber,
+          });
+        }
+      });
+    });
+
+    payments.sort((a, b) => a.paymentDate.localeCompare(b.paymentDate));
+    const total = payments.reduce((sum, item) => sum + Number(item.paidAmount || 0), 0);
+
+    addPdfHeader(
+      doc,
+      'COLLECTION STATEMENT',
+      `Project: ${projectData.identity.village} | Dates: ${displayDate(collectionDates.from)} to ${displayDate(collectionDates.to)}`
+    );
+
+    (doc as any).autoTable({
+      ...pdfTableDefaults,
+      startY: 78,
+      margin: { left: 40, right: 40 },
+      head: [['Payment Date', 'Plot', 'Customer', 'Amount', 'Mode']],
+      body: payments.map((payment) => [
+        displayDate(payment.paymentDate),
+        `#${payment.plotNumber}`,
+        `${payment.customerName || '-'}\n${payment.phoneNumber || '-'}`,
+        formatCurrency(Number(payment.paidAmount || 0)),
+        payment.paymentMode || 'CASH',
+      ]),
+      foot: [['Total Collection', '', '', formatCurrency(total), '']],
+      showFoot: 'lastPage',
+      columnStyles: {
+        0: { cellWidth: 86 },
+        1: { cellWidth: 54 },
+        2: { cellWidth: 190 },
+        3: { halign: 'right', cellWidth: 100 },
+        4: { cellWidth: 70 },
+      },
+    });
+
+    addPdfFooter(doc);
+    doc.save(`Collection_${projectData.identity.village}_${collectionDates.from}.pdf`);
   };
 
   return (
@@ -794,21 +908,8 @@ const [showReportPreview, setShowReportPreview] = useState(false);
             </div>
 
             <div className="p-4 bg-slate-50 border-t border-slate-200">
-              <button 
-                onClick={() => {
-                  const element = document.getElementById('collection-pdf-template');
-                  if (!element) return;
-                  element.style.display = 'block';
-                  const opt = { 
-                    margin: 0.5, 
-                    filename: `Collection_${projectData.identity.village}_${collectionDates.from}.pdf`, 
-                    image: { type: 'jpeg', quality: 0.98 }, 
-                    html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-                    jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
-                    pagebreak: { mode: ['avoid-all', 'css', 'legacy'], avoid: ['tr', '.pdf-row', '.pdf-card'] }
-                  };
-                  html2pdf().set(opt).from(element).save().then(() => { element.style.display = 'none'; });
-                }}
+              <button
+                onClick={handleGenerateCollectionStatement}
                 className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold text-sm shadow-xl hover:bg-black transition-all flex items-center justify-center gap-2"
               >
                 <Download size={18} /> Download Statement (PDF)
@@ -1128,25 +1229,125 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
     };
 
     const handleExportPDF = () => {
-        const element = document.getElementById(`pdf-template-${plotId}`);
-        if (!element) return;
-        element.style.display = 'block';
-        
+        const doc = createPdfDoc('portrait');
+        if (!doc) return;
+
         const customerName = plotData.customerName ? plotData.customerName.replace(/\s+/g, '_') : 'Customer';
         const plotNum = plotData.plotNumber || 'Plot';
 
-        const opt = {
-          margin: [0.3, 0.3, 0.3, 0.3],
-          filename: `Deal_${plotNum}_${customerName}.pdf`,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-          jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
-          pagebreak: { mode: ['avoid-all', 'css', 'legacy'], avoid: ['tr', '.pdf-row', '.pdf-card'] }
+        addPdfHeader(doc, 'PLOT SALE AGREEMENT', `Agreement Ref: ${new Date().getFullYear()}-${plotNum} | Project: ${projectIdentity.village || 'Project'}`);
+        doc.setFontSize(9);
+        doc.setTextColor(75, 85, 99);
+        doc.text(`Generated: ${displayDate(new Date().toISOString())}`, 430, 42);
+
+        const drawBox = (x: number, y: number, w: number, h: number, title: string, lines: string[]) => {
+          doc.setDrawColor(229, 231, 235);
+          doc.setFillColor(249, 250, 251);
+          doc.roundedRect(x, y, w, h, 4, 4, 'FD');
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(8);
+          doc.setTextColor(107, 114, 128);
+          doc.text(title.toUpperCase(), x + 12, y + 18);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9);
+          doc.setTextColor(31, 41, 55);
+          lines.forEach((line, idx) => doc.text(line, x + 12, y + 36 + idx * 14));
         };
 
-        html2pdf().set(opt).from(element).save().then(() => {
-           element.style.display = 'none'; 
+        const dealEnd = (() => {
+          if (!deal.startDate || !deal.totalDurationVal) return '-';
+          const endDate = new Date(deal.startDate + 'T12:00:00');
+          const duration = parseInt(deal.totalDurationVal) || 0;
+          if (deal.totalDurationUnit === 'Days') endDate.setDate(endDate.getDate() + duration);
+          else endDate.setMonth(endDate.getMonth() + duration);
+          return displayDate(endDate.toISOString().split('T')[0]);
+        })();
+
+        drawBox(40, 78, 245, 96, 'Buyer Details', [
+          plotData.customerName || 'N/A',
+          `Phone: ${plotData.phoneNumber || '-'}`,
+          `Agreement Date: ${displayDate(deal.startDate || plotData.bookingDate)}`,
+          `Deal End: ${dealEnd}`,
+        ]);
+        drawBox(310, 78, 245, 96, 'Property Details', [
+          `Plot Number: #${plotData.plotNumber}`,
+          `Area: ${formatInputNumber(plotData.areaVaar)} Vaar`,
+          `Rate: ${formatCurrency(Number(plotData.customLandRate))} / vaar`,
+          `Dimensions: ${plotData.dimLengthFt} x ${plotData.dimWidthFt} ft`,
+        ]);
+
+        (doc as any).autoTable({
+          ...pdfTableDefaults,
+          startY: 198,
+          margin: { left: 40, right: 40 },
+          head: [['Gross Deal', 'Commission', 'Net Deal', 'Paid', 'Balance']],
+          body: [[
+            formatCurrency(totalValue),
+            `- ${formatCurrency(commissionAmount)}`,
+            formatCurrency(netTotalValue),
+            formatCurrency(totalPaid),
+            formatCurrency(balanceDue),
+          ]],
+          columnStyles: {
+            0: { halign: 'right' },
+            1: { halign: 'right' },
+            2: { halign: 'right' },
+            3: { halign: 'right' },
+            4: { halign: 'right' },
+          },
         });
+
+        const scheduleStartY = ((doc as any).lastAutoTable?.finalY || 250) + 24;
+        let runningBalance = netTotalValue;
+        const scheduleRows = deal.schedule.map((item) => {
+          if (item.isPaid) runningBalance -= Number(item.paidAmount);
+          return [
+            item.label,
+            displayDate(item.dueDate),
+            formatCurrency(item.expectedAmount),
+            item.isPaid ? formatCurrency(Number(item.paidAmount)) : '-',
+            item.isPaid ? formatCurrency(runningBalance) : '-',
+            item.isPaid ? [item.paymentMode || 'CASH', item.paymentMode === 'BANK' ? `${item.bankName || ''} #${item.refNumber || ''}` : '', item.remarks || ''].filter(Boolean).join('\n') : 'Pending',
+          ];
+        });
+
+        (doc as any).autoTable({
+          ...pdfTableDefaults,
+          startY: scheduleStartY,
+          margin: { left: 40, right: 40 },
+          head: [['Description', 'Due Date', 'Due Amount', 'Paid Amount', 'Balance', 'Ref / Remarks']],
+          body: scheduleRows,
+          foot: [['Total', '', formatCurrency(netTotalValue), formatCurrency(totalPaid), formatCurrency(balanceDue), '']],
+          showFoot: 'lastPage',
+          columnStyles: {
+            0: { cellWidth: 100 },
+            1: { cellWidth: 72 },
+            2: { halign: 'right', cellWidth: 78 },
+            3: { halign: 'right', cellWidth: 78 },
+            4: { halign: 'right', cellWidth: 78 },
+            5: { cellWidth: 110 },
+          },
+        });
+
+        const pageHeight = doc.internal.pageSize.getHeight();
+        let y = ((doc as any).lastAutoTable?.finalY || 650) + 70;
+        if (y > pageHeight - 90) {
+          doc.addPage();
+          y = 120;
+        }
+        doc.setDrawColor(17, 24, 39);
+        doc.line(70, y, 250, y);
+        doc.line(345, y, 525, y);
+        doc.setFontSize(9);
+        doc.setTextColor(17, 24, 39);
+        doc.text('Customer Signature', 110, y + 16);
+        doc.text('Authorized Signatory', 385, y + 16);
+        doc.setFontSize(8);
+        doc.setTextColor(107, 114, 128);
+        doc.text(`For ${projectIdentity.village || 'Company'}`, 398, y + 30);
+
+        addPdfFooter(doc);
+        doc.save(`Deal_${plotNum}_${customerName}.pdf`);
     };
 
     // Calculate Totals for Footer
