@@ -465,7 +465,7 @@ const [showReportPreview, setShowReportPreview] = useState(false);
                    {/* TABLE */}
                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px' }}>
                       <thead>
-                         <tr style={{ backgroundColor: '#1f2937', color: '#fff' }}>
+                         <tr className="pdf-row" style={{ backgroundColor: '#1f2937', color: '#fff', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                             <th style={{ padding: '10px', textAlign: 'left' }}>Plot</th>
                             <th style={{ padding: '10px', textAlign: 'left' }}>Customer</th>
                             <th style={{ padding: '10px', textAlign: 'right' }}>Gross Value</th>
@@ -477,7 +477,7 @@ const [showReportPreview, setShowReportPreview] = useState(false);
                       </thead>
                       <tbody>
                          {rows}
-                         <tr style={{ backgroundColor: '#f3f4f6', fontWeight: 'bold', borderTop: '2px solid #000' }}>
+                         <tr className="pdf-row" style={{ backgroundColor: '#f3f4f6', fontWeight: 'bold', borderTop: '2px solid #000', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                             <td colSpan={2} style={{ padding: '12px', textAlign: 'center' }}>GRAND TOTALS (Sold Plots)</td>
                             <td style={{ padding: '12px', textAlign: 'right' }}>{formatCurrency(gTotalGross)}</td>
                             <td style={{ padding: '12px', textAlign: 'right', color: '#ef4444' }}>{formatCurrency(gTotalComm)}</td>
@@ -803,8 +803,9 @@ const [showReportPreview, setShowReportPreview] = useState(false);
                     margin: 0.5, 
                     filename: `Collection_${projectData.identity.village}_${collectionDates.from}.pdf`, 
                     image: { type: 'jpeg', quality: 0.98 }, 
-                    html2canvas: { scale: 2 }, 
-                    jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' } 
+                    html2canvas: { scale: 2, useCORS: true, letterRendering: true },
+                    jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
+                    pagebreak: { mode: ['avoid-all', 'css', 'legacy'], avoid: ['tr', '.pdf-row', '.pdf-card'] }
                   };
                   html2pdf().set(opt).from(element).save().then(() => { element.style.display = 'none'; });
                 }}
@@ -825,46 +826,42 @@ const [showReportPreview, setShowReportPreview] = useState(false);
                 Project: {projectData.identity.village} | Dates: {displayDate(collectionDates.from)} to {displayDate(collectionDates.to)}
               </p>
           </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-              <thead>
-                <tr style={{ backgroundColor: '#f9fafb' }}>
-                  <th style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'left' }}>Date</th>
-                  <th style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'left' }}>Plot</th>
-                  <th style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'left' }}>Customer</th>
-                  <th style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'right' }}>Amount</th>
-                  <th style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'left' }}>Mode</th>
-                </tr>
-              </thead>
-              <tbody>
-                  {(() => {
-                      const pays: any[] = [];
-                      plots.forEach((pl: any) => (pl.dealStructure?.schedule || []).forEach((ins: any) => { 
-                        if (ins.isPaid && ins.paymentDate >= collectionDates.from && ins.paymentDate <= collectionDates.to) {
-                          pays.push({ ...ins, plot: pl.plotNumber, name: pl.customerName }); 
-                        }
-                      }));
-                      const total = pays.reduce((s, p) => s + Number(p.paidAmount), 0);
-                      return (
-                        <>
-                          {pays.sort((a,b) => a.paymentDate.localeCompare(b.paymentDate)).map((p, i) => (
-                            <tr key={i} className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
-                                <td style={{ border: '1px solid #e5e7eb', padding: '10px' }}>{displayDate(p.paymentDate)}</td>
-                                <td style={{ border: '1px solid #e5e7eb', padding: '10px', fontWeight: 'bold' }}>#{p.plot}</td>
-                                <td style={{ border: '1px solid #e5e7eb', padding: '10px' }}>{p.name}</td>
-                                <td style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(p.paidAmount)}</td>
-                                <td style={{ border: '1px solid #e5e7eb', padding: '10px' }}>{p.paymentMode || 'CASH'}</td>
-                            </tr>
-                          ))}
-                          <tr style={{ backgroundColor: '#f0fdf4' }}>
-                            <td colSpan={3} style={{ border: '1px solid #e5e7eb', padding: '15px', textAlign: 'right', fontWeight: 'bold' }}>TOTAL COLLECTION:</td>
-                            <td style={{ border: '1px solid #e5e7eb', padding: '15px', textAlign: 'right', fontWeight: 'bold', color: '#059669', fontSize: '14px' }}>{formatCurrency(total)}</td>
-                            <td style={{ border: '1px solid #e5e7eb' }}></td>
-                          </tr>
-                        </>
-                      );
-                  })()}
-              </tbody>
-          </table>
+          <div style={{ border: '1px solid #e5e7eb', borderBottom: 'none', fontSize: '11px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 2fr 1.2fr 0.8fr', backgroundColor: '#f9fafb', fontWeight: 700 }}>
+              <div style={{ borderBottom: '1px solid #e5e7eb', padding: '10px' }}>Date</div>
+              <div style={{ borderBottom: '1px solid #e5e7eb', padding: '10px' }}>Plot</div>
+              <div style={{ borderBottom: '1px solid #e5e7eb', padding: '10px' }}>Customer</div>
+              <div style={{ borderBottom: '1px solid #e5e7eb', padding: '10px', textAlign: 'right' }}>Amount</div>
+              <div style={{ borderBottom: '1px solid #e5e7eb', padding: '10px' }}>Mode</div>
+            </div>
+            {(() => {
+              const pays: any[] = [];
+              plots.forEach((pl: any) => (pl.dealStructure?.schedule || []).forEach((ins: any) => {
+                if (ins.isPaid && ins.paymentDate >= collectionDates.from && ins.paymentDate <= collectionDates.to) {
+                  pays.push({ ...ins, plot: pl.plotNumber, name: pl.customerName });
+                }
+              }));
+              const total = pays.reduce((s, p) => s + Number(p.paidAmount), 0);
+              return (
+                <>
+                  {pays.sort((a, b) => a.paymentDate.localeCompare(b.paymentDate)).map((p, i) => (
+                    <div key={i} className="pdf-row pdf-card" style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 2fr 1.2fr 0.8fr', borderBottom: '1px solid #e5e7eb', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
+                      <div style={{ padding: '10px' }}>{displayDate(p.paymentDate)}</div>
+                      <div style={{ padding: '10px', fontWeight: 'bold' }}>#{p.plot}</div>
+                      <div style={{ padding: '10px' }}>{p.name}</div>
+                      <div style={{ padding: '10px', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(p.paidAmount)}</div>
+                      <div style={{ padding: '10px' }}>{p.paymentMode || 'CASH'}</div>
+                    </div>
+                  ))}
+                  <div className="pdf-row pdf-card" style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 2fr 1.2fr 0.8fr', backgroundColor: '#f0fdf4', borderBottom: '1px solid #e5e7eb', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
+                    <div style={{ gridColumn: '1 / span 3', padding: '15px', textAlign: 'right', fontWeight: 'bold' }}>TOTAL COLLECTION:</div>
+                    <div style={{ padding: '15px', textAlign: 'right', fontWeight: 'bold', color: '#059669', fontSize: '14px' }}>{formatCurrency(total)}</div>
+                    <div style={{ padding: '15px' }}></div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
       </div>
 
     </div>
@@ -1428,7 +1425,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
                             <div>
                                 <div style={{ padding: '8px 0', borderBottom: '2px solid #e5e7eb', marginBottom: '10px', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', color: '#374151' }}>Payment Schedule</div>
                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-                                    <thead><tr style={{ backgroundColor: '#374151', color: '#ffffff' }}><th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', borderRadius: '4px 0 0 4px' }}>Description</th><th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500' }}>Due Date</th><th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Due Amount</th><th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Paid Amount</th><th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Balance</th><th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', width: '20%', borderRadius: '0 4px 4px 0' }}>Ref / Remarks</th></tr></thead>
+                                    <thead><tr className="pdf-row" style={{ backgroundColor: '#374151', color: '#ffffff', pageBreakInside: 'avoid', breakInside: 'avoid' }}><th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', borderRadius: '4px 0 0 4px' }}>Description</th><th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500' }}>Due Date</th><th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Due Amount</th><th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Paid Amount</th><th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Balance</th><th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', width: '20%', borderRadius: '0 4px 4px 0' }}>Ref / Remarks</th></tr></thead>
                                     <tbody>
                                         {(() => {
                                             let pdfRunningBalance = netTotalValue;
@@ -1445,10 +1442,10 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
                                             });
                                         })()}
                                     </tbody>
-                                    <tfoot><tr style={{ borderTop: '2px solid #374151' }}><td colSpan={2} style={{ padding: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Total</td><td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(netTotalValue)}</td><td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold', color: '#059669' }}>{formatCurrency(totalPaid)}</td><td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{formatCurrency(balanceDue)}</td><td></td></tr></tfoot>
+                                    <tfoot><tr className="pdf-row" style={{ borderTop: '2px solid #374151', pageBreakInside: 'avoid', breakInside: 'avoid' }}><td colSpan={2} style={{ padding: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Total</td><td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(netTotalValue)}</td><td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold', color: '#059669' }}>{formatCurrency(totalPaid)}</td><td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{formatCurrency(balanceDue)}</td><td></td></tr></tfoot>
                                 </table>
                             </div>
-                            <div style={{ marginTop: '60px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', pageBreakInside: 'avoid' }}><div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #111827', width: '180px', margin: '0 auto 8px' }}></div><div style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' }}>Customer Signature</div></div><div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #111827', width: '180px', margin: '0 auto 8px' }}></div><div style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' }}>Authorized Signatory</div><div style={{ fontSize: '9px', color: '#6b7280' }}>For {projectIdentity.village || 'Company'}</div></div></div>
+                            <div className="pdf-card" style={{ marginTop: '60px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', pageBreakInside: 'avoid', breakInside: 'avoid' }}><div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #111827', width: '180px', margin: '0 auto 8px' }}></div><div style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' }}>Customer Signature</div></div><div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #111827', width: '180px', margin: '0 auto 8px' }}></div><div style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' }}>Authorized Signatory</div><div style={{ fontSize: '9px', color: '#6b7280' }}>For {projectIdentity.village || 'Company'}</div></div></div>
                         </div>
                     </div>
                 </div>

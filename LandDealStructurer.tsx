@@ -443,7 +443,8 @@ const handleClear = () => {
       filename: `LEDGER_${villageName}_${fromDate}_to_${toDate}.pdf`,
       image: { type: 'jpeg', quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
+      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['avoid-all', 'css', 'legacy'], avoid: ['tr', '.pdf-row', '.pdf-card'] }
     };
 
     html2pdf().set(opt).from(element).save().then(() => {
@@ -1451,27 +1452,27 @@ const handleDpAmountChange = (val: string) => {
                   <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '10px', fontSize: '11px' }}>
                      <tbody>
                        {/* 1. Stamp Duty */}
-                       <tr>
+                       <tr className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                           <td style={{ padding: '6px 0', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#000000' }}>1. Stamp Duty & Registration ({costSheetBasis === '100' ? '100% Land' : '60% FP'})</td>
                           <td style={{ textAlign: 'right', fontWeight: 'bold', borderBottom: '1px solid #e5e7eb', color: '#000000' }}>{formatCurrency(currentStampDuty)}</td>
                        </tr>
                        
                        {/* 2. Additional Expenses Header */}
-                       <tr>
+                       <tr className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                           <td colSpan={2} style={{ padding: '8px 0 4px', fontWeight: 'bold', color: '#333333', fontSize: '10px', textTransform: 'uppercase' }}>2. Additional Expenses Breakdown</td>
                        </tr>
 
                        {/* List of Extras */}
-                       {getNum(overheads.architectFees) > 0 && <tr><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>Architect Fees</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.architectFees))}</td></tr>}
-                       {getNum(overheads.planPassFees) > 0 && <tr><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>Plan Pass Fees</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.planPassFees))}</td></tr>}
-                       {getNum(overheads.naExpense) > 0 && <tr><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>NA Expense</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.naExpense))}</td></tr>}
-                       {getNum(overheads.naPremium) > 0 && <tr><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>NA Premium</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.naPremium))}</td></tr>}
-                       {getNum(overheads.developmentCost) > 0 && <tr><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>Development Cost</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.developmentCost))}</td></tr>}
+                       {getNum(overheads.architectFees) > 0 && <tr className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>Architect Fees</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.architectFees))}</td></tr>}
+                       {getNum(overheads.planPassFees) > 0 && <tr className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>Plan Pass Fees</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.planPassFees))}</td></tr>}
+                       {getNum(overheads.naExpense) > 0 && <tr className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>NA Expense</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.naExpense))}</td></tr>}
+                       {getNum(overheads.naPremium) > 0 && <tr className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>NA Premium</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.naPremium))}</td></tr>}
+                       {getNum(overheads.developmentCost) > 0 && <tr className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>Development Cost</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.developmentCost))}</td></tr>}
                        
                        {/* Custom Expenses List in PDF */}
                        {(overheads.customExpenses || []).map(item => (
                           getNum(item.amount) > 0 && (
-                            <tr key={item.id}>
+                            <tr key={item.id} className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                               <td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{item.name || 'Extra Expense'}</td>
                               <td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(item.amount))}</td>
                             </tr>
@@ -1479,19 +1480,19 @@ const handleDpAmountChange = (val: string) => {
                        ))}
 
                        {/* Total Additional Expenses Subtotal */}
-                       <tr style={{ backgroundColor: '#f9fafb' }}>
+                       <tr className="pdf-row" style={{ backgroundColor: '#f9fafb', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                           <td style={{ padding: '6px 8px', fontWeight: 'bold', color: '#4b5563', fontSize: '11px' }}>Total Additional Expenses</td>
                           <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 'bold', color: '#4b5563', fontSize: '11px' }}>{formatCurrency(result.totalAdditionalExpenses)}</td>
                        </tr>
 
                        {/* Grand Total */}
-                       <tr style={{ backgroundColor: '#fff7ed', borderTop: '2px solid #ea580c' }}>
+                       <tr className="pdf-row" style={{ backgroundColor: '#fff7ed', borderTop: '2px solid #ea580c', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                           <td style={{ padding: '12px 8px', fontWeight: 'bold', color: '#c2410c', fontSize: '12px' }}>FINAL PROJECT COST ({costSheetBasis}%)</td>
                           <td style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 'bold', color: '#c2410c', fontSize: '14px' }}>{formatCurrency(currentLandedCost)}</td>
                        </tr>
                        
                        {/* Total Project Cost */}
-                       <tr style={{ backgroundColor: '#fff7ed', borderTop: '2px solid #ea580c' }}>
+                       <tr className="pdf-row" style={{ backgroundColor: '#fff7ed', borderTop: '2px solid #ea580c', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                           <td style={{ padding: '12px 8px', fontWeight: 'bold', color: '#c2410c', fontSize: '12px' }}>TOTAL PROJECT COST ({costSheetBasis}%)</td>
                           <td style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 'bold', color: '#c2410c', fontSize: '14px' }}>{formatCurrency(currentLandedCost)}</td>
                        </tr>
@@ -1681,7 +1682,7 @@ const handleDpAmountChange = (val: string) => {
         {/* Ledger Table */}
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
           <thead>
-            <tr style={{ backgroundColor: '#f1f5f9' }}>
+            <tr className="pdf-row" style={{ backgroundColor: '#f1f5f9', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
               <th style={{ padding: '12px 10px', textAlign: 'left', borderBottom: '2px solid #cbd5e1', color: '#475569', width: '20%' }}>Date</th>
               <th style={{ padding: '12px 10px', textAlign: 'left', borderBottom: '2px solid #cbd5e1', color: '#475569', width: '55%' }}>Description / Expense Name</th>
               <th style={{ padding: '12px 10px', textAlign: 'right', borderBottom: '2px solid #cbd5e1', color: '#475569', width: '25%' }}>Amount (₹)</th>
@@ -1711,7 +1712,7 @@ const handleDpAmountChange = (val: string) => {
             )}
           </tbody>
           <tfoot>
-            <tr style={{ backgroundColor: '#f8fafc' }}>
+            <tr className="pdf-row" style={{ backgroundColor: '#f8fafc', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
               <td colSpan={2} style={{ padding: '15px 10px', textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: '#334155', borderTop: '2px solid #cbd5e1' }}>
                 GRAND TOTAL FOR PERIOD
               </td>
