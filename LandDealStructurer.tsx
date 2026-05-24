@@ -40,7 +40,7 @@ import {
   formatInputNumber,
   parseInputNumber
 } from '../utils/formatters';
-import { addPdfFooter, addPdfHeader, autoTable, createPdfDoc, pdfTableDefaults } from '../utils/pdf';
+import { addPdfFooter, addPdfHeader, autoTable, createPdfDoc, failPdfDownload, formatPdfCurrency, getPdfContentStartY, getPdfNextY } from '../utils/pdf';
 import { supabase } from '../supabaseClient';
 
 const CONVERSION_RATES = {
@@ -409,8 +409,7 @@ const handleClear = () => {
     const filename = `GDK_NEXUS_${villageName}_FP${fpNumber}.pdf`;
     const doc = await createPdfDoc('portrait');
     if (!doc) {
-      console.error('PDF generation failed: jsPDF runtime unavailable (Land Cost Sheet).');
-      alert('PDF generation failed. Please refresh and try again.');
+      failPdfDownload('Land Cost Sheet', new Error('Unable to create PDF document.'));
       return;
     }
 
@@ -428,8 +427,7 @@ const handleClear = () => {
     addPdfHeader(doc, 'GDK NEXUS LAND COST SHEET', `Project: ${identity.village || 'Unnamed Project'} | TP: ${identity.tpScheme || '-'} | FP: ${identity.fpNumber || '-'}`);
 
     autoTable(doc, {
-      ...pdfTableDefaults,
-      startY: 78,
+      startY: getPdfContentStartY(),
       margin: { left: 40, right: 40 },
       head: [['Project Identity', 'Value']],
       body: [
@@ -442,63 +440,64 @@ const handleClear = () => {
     });
 
     autoTable(doc, {
-      ...pdfTableDefaults,
-      startY: ((doc as any).lastAutoTable?.finalY || 130) + 18,
+      startY: getPdfNextY(doc, 130),
       margin: { left: 40, right: 40 },
       head: [['Land / Jantri Metrics', 'Value']],
       body: [
         ['Input Area', `${formatInputNumber(measurements.areaInput)} ${measurements.inputUnit}`],
         ['Total Area', `${formatInputNumber(result.totalSqMt)} SqMt / ${formatInputNumber(result.inputInVigha)} Vigha`],
         ['FP Area (60%)', `${formatInputNumber(result.fpAreaSqMt)} SqMt / ${formatInputNumber(result.fpInVigha)} Vigha`],
-        ['Jantri Rate', `${formatCurrency(getNum(measurements.jantriRate))} / SqMt`],
-        [`Jantri Value (${costSheetBasis}% basis)`, formatCurrency(currentJantriDisplay)],
+        ['Jantri Rate', `${formatPdfCurrency(getNum(measurements.jantriRate))} / SqMt`],
+        [`Jantri Value (${costSheetBasis}% basis)`, formatPdfCurrency(currentJantriDisplay)],
       ],
-      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 170 } },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 220 }, 1: { cellWidth: 295 } },
     });
 
     const costRows = [
-      ['Land Deal Price', formatCurrency(calculatedDealPrice)],
-      [`Stamp Duty & Registration (${costSheetBasis}% basis)`, formatCurrency(currentStampDuty)],
-      ['Architect Fees', formatCurrency(getNum(overheads.architectFees))],
-      ['Plan Pass Fees', formatCurrency(getNum(overheads.planPassFees))],
-      ['NA Expense', formatCurrency(getNum(overheads.naExpense))],
-      ['NA Premium', formatCurrency(getNum(overheads.naPremium))],
-      ['Development Cost', formatCurrency(getNum(overheads.developmentCost))],
-      ...(overheads.customExpenses || []).map((item: any) => [item.name || 'Extra Expense', formatCurrency(getNum(item.amount))]),
-    ].filter((row) => row[1] !== formatCurrency(0));
+      ['Land Deal Price', formatPdfCurrency(calculatedDealPrice)],
+      [`Stamp Duty & Registration (${costSheetBasis}% basis)`, formatPdfCurrency(currentStampDuty)],
+      ['Architect Fees', formatPdfCurrency(getNum(overheads.architectFees))],
+      ['Plan Pass Fees', formatPdfCurrency(getNum(overheads.planPassFees))],
+      ['NA Expense', formatPdfCurrency(getNum(overheads.naExpense))],
+      ['NA Premium', formatPdfCurrency(getNum(overheads.naPremium))],
+      ['Development Cost', formatPdfCurrency(getNum(overheads.developmentCost))],
+      ...(overheads.customExpenses || []).map((item: any) => [item.name || 'Extra Expense', formatPdfCurrency(getNum(item.amount))]),
+    ].filter((row) => row[1] !== formatPdfCurrency(0));
 
     autoTable(doc, {
-      ...pdfTableDefaults,
-      startY: ((doc as any).lastAutoTable?.finalY || 250) + 18,
+      startY: getPdfNextY(doc, 250),
       margin: { left: 40, right: 40 },
       head: [['Cost Breakdown', 'Amount']],
       body: costRows,
-      foot: [['Final Project Cost', formatCurrency(currentLandedCost)]],
+      foot: [['Final Project Cost', formatPdfCurrency(currentLandedCost)]],
       showFoot: 'lastPage',
-      columnStyles: { 0: { cellWidth: 330 }, 1: { halign: 'right' } },
+      columnStyles: { 0: { cellWidth: 365 }, 1: { halign: 'right', cellWidth: 150, fontStyle: 'bold' } },
     });
 
     autoTable(doc, {
-      ...pdfTableDefaults,
-      startY: ((doc as any).lastAutoTable?.finalY || 380) + 18,
+      startY: getPdfNextY(doc, 380),
       margin: { left: 40, right: 40 },
       head: [['#', 'Description', 'Due Date', 'Amount']],
       body: result.schedule.map((item, index) => [
         `${index + 1}`,
         item.description,
         item.date,
-        formatCurrency(item.amount),
+        formatPdfCurrency(item.amount),
       ]),
-      foot: [['', 'Total Payable to Land Owner', '', formatCurrency(result.grandTotalPayment)]],
+      foot: [['', 'Total Payable to Land Owner', '', formatPdfCurrency(result.grandTotalPayment)]],
       showFoot: 'lastPage',
-      columnStyles: { 0: { cellWidth: 35 }, 3: { halign: 'right' } },
+      columnStyles: {
+        0: { cellWidth: 34, halign: 'center' },
+        1: { cellWidth: 258 },
+        2: { cellWidth: 88 },
+        3: { halign: 'right', cellWidth: 135, fontStyle: 'bold' },
+      },
     });
 
     addPdfFooter(doc);
     doc.save(filename);
     } catch (error) {
-      console.error('PDF generation failed (Land Cost Sheet):', error);
-      alert('PDF generation failed. Please check data and try again.');
+      failPdfDownload('Land Cost Sheet', error);
     }
  };
 
@@ -509,8 +508,7 @@ const handleClear = () => {
     const filename = `LEDGER_${villageName}_${fromDate}_to_${toDate}.pdf`;
     const doc = await createPdfDoc('portrait');
     if (!doc) {
-      console.error('PDF generation failed: jsPDF runtime unavailable (Ledger Statement).');
-      alert('PDF generation failed. Please refresh and try again.');
+      failPdfDownload('Ledger Statement', new Error('Unable to create PDF document.'));
       return;
     }
 
@@ -521,28 +519,27 @@ const handleClear = () => {
     addPdfHeader(doc, 'EXPENSE LEDGER STATEMENT', `Project: ${identity.village || 'Unnamed Project'} | Period: ${fromDate} to ${toDate}`);
 
     autoTable(doc, {
-      ...pdfTableDefaults,
-      startY: 78,
+      startY: getPdfContentStartY(),
       margin: { left: 40, right: 40 },
       head: [['Date', 'Description / Expense Name', 'Amount']],
       body: transactions.map((item) => [
         new Date(`${item.date}T12:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
         item.name,
-        formatCurrency(item.amount),
+        formatPdfCurrency(item.amount),
       ]),
-      foot: [['', 'Grand Total for Period', formatCurrency(total)]],
+      foot: [['', 'Grand Total for Period', formatPdfCurrency(total)]],
       showFoot: 'lastPage',
       columnStyles: {
-        0: { cellWidth: 100 },
-        2: { halign: 'right', cellWidth: 110 },
+        0: { cellWidth: 95 },
+        1: { cellWidth: 270 },
+        2: { halign: 'right', cellWidth: 150, fontStyle: 'bold' },
       },
     });
 
     addPdfFooter(doc);
     doc.save(filename);
     } catch (error) {
-      console.error('PDF generation failed (Ledger Statement):', error);
-      alert('PDF generation failed. Please check data and try again.');
+      failPdfDownload('Ledger Statement', error);
     }
   };
 

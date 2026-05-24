@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { ProjectSavedState } from '../types';
 import { formatCurrency, formatInputNumber, parseInputNumber } from '../utils/formatters';
-import { addPdfFooter, addPdfHeader, autoTable, createPdfDoc, pdfTableDefaults } from '../utils/pdf';
+import { addPdfFooter, addPdfHeader, autoTable, createPdfDoc, failPdfDownload, formatPdfCurrency, getPdfContentStartY, getPdfNextY } from '../utils/pdf';
 import { supabase } from '../supabaseClient';
 
 const CONVERSION_RATES: any = {
@@ -177,8 +177,7 @@ const [showReportPreview, setShowReportPreview] = useState(false);
   const handleGenerateProjectReport = async () => {
     const doc = await createPdfDoc('landscape');
     if (!doc) {
-      console.error('PDF generation failed: jsPDF runtime unavailable (Project Report).');
-      alert('PDF generation failed. Please refresh and try again.');
+      failPdfDownload('Project Report', new Error('Unable to create PDF document.'));
       return;
     }
 
@@ -229,182 +228,115 @@ const [showReportPreview, setShowReportPreview] = useState(false);
         `#${plot.plotNumber}`,
         `${plot.customerName || '-'}\n${plot.phoneNumber || '-'}`,
         `${formatInputNumber(area)} Vaar`,
-        formatCurrency(grossVal),
-        commission > 0 ? formatCurrency(commission) : '-',
-        formatCurrency(netVal),
-        formatCurrency(received),
-        formatCurrency(pending),
+        formatPdfCurrency(grossVal),
+        commission > 0 ? formatPdfCurrency(commission) : '-',
+        formatPdfCurrency(netVal),
+        formatPdfCurrency(received),
+        formatPdfCurrency(pending),
       ];
     });
 
-    addPdfHeader(doc, `PROJECT SALES REPORT: ${projectData.identity.village}`, `Estimated sale: ${formatCurrency(projectEstSale)} | Sold gross: ${formatCurrency(gTotalGross)} | Unsold value: ${formatCurrency(projectEstSale - gTotalGross)}`);
+    addPdfHeader(doc, `PROJECT SALES REPORT: ${projectData.identity.village}`, `Estimated sale: ${formatPdfCurrency(projectEstSale)} | Sold gross: ${formatPdfCurrency(gTotalGross)} | Unsold value: ${formatPdfCurrency(projectEstSale - gTotalGross)}`);
     autoTable(doc, {
-      ...pdfTableDefaults,
-      startY: 78,
+      startY: getPdfContentStartY(),
       margin: { left: 28, right: 28 },
       head: [['Plot', 'Customer', 'Size', 'Gross Value', 'Commission', 'Net Deal', 'Received', 'Pending']],
       body: rows,
-      foot: [['Grand Totals', '', '', formatCurrency(gTotalGross), formatCurrency(gTotalComm), formatCurrency(gTotalNet), formatCurrency(gTotalRec), formatCurrency(gTotalPend)]],
+      foot: [['Grand Totals', '', '', formatPdfCurrency(gTotalGross), formatPdfCurrency(gTotalComm), formatPdfCurrency(gTotalNet), formatPdfCurrency(gTotalRec), formatPdfCurrency(gTotalPend)]],
       showFoot: 'lastPage',
       columnStyles: {
         0: { cellWidth: 42 },
-        1: { cellWidth: 140 },
-        2: { halign: 'right' },
-        3: { halign: 'right' },
-        4: { halign: 'right' },
-        5: { halign: 'right' },
-        6: { halign: 'right' },
-        7: { halign: 'right' },
+        1: { cellWidth: 118 },
+        2: { halign: 'right', cellWidth: 64 },
+        3: { halign: 'right', cellWidth: 112, fontStyle: 'bold' },
+        4: { halign: 'right', cellWidth: 100, fontStyle: 'bold' },
+        5: { halign: 'right', cellWidth: 112, fontStyle: 'bold' },
+        6: { halign: 'right', cellWidth: 112, fontStyle: 'bold' },
+        7: { halign: 'right', cellWidth: 112, fontStyle: 'bold' },
       },
     });
     addPdfFooter(doc);
     doc.save(`Project_Report_${projectData.identity.village}.pdf`);
     } catch (error) {
-      console.error('PDF generation failed (Project Report):', error);
-      alert('PDF generation failed. Please check data and try again.');
+      failPdfDownload('Project Report', error);
     }
   };
 
   const handleGenerateCollectionStatement = async () => {
-    const doc = await createPdfDoc('portrait', false);
+    const doc = await createPdfDoc('portrait');
     if (!doc) {
-      alert('PDF download engine could not load. Please refresh and try again.');
+      failPdfDownload('Collection Statement', new Error('Unable to create PDF document.'));
       return;
     }
 
     try {
-    const payments: any[] = [];
-    plots.forEach((plot: any) => {
-      (plot.dealStructure?.schedule || []).forEach((installment: any) => {
-        if (installment.isPaid && installment.paymentDate >= collectionDates.from && installment.paymentDate <= collectionDates.to) {
-          payments.push({
-            ...installment,
-            plotNumber: plot.plotNumber,
-            customerName: plot.customerName,
-            phoneNumber: plot.phoneNumber,
-          });
-        }
+      const payments: any[] = [];
+      plots.forEach((plot: any) => {
+        (plot.dealStructure?.schedule || []).forEach((installment: any) => {
+          if (installment.isPaid && installment.paymentDate >= collectionDates.from && installment.paymentDate <= collectionDates.to) {
+            payments.push({
+              ...installment,
+              plotNumber: plot.plotNumber,
+              customerName: plot.customerName,
+              phoneNumber: plot.phoneNumber,
+            });
+          }
+        });
       });
-    });
 
-    payments.sort((a, b) => a.paymentDate.localeCompare(b.paymentDate));
-    const total = payments.reduce((sum, item) => sum + Number(item.paidAmount || 0), 0);
+      payments.sort((a, b) => a.paymentDate.localeCompare(b.paymentDate));
+      const total = payments.reduce((sum, item) => sum + Number(item.paidAmount || 0), 0);
 
-    addPdfHeader(
-      doc,
-      'COLLECTION STATEMENT',
-      `Project: ${projectData.identity.village} | Dates: ${displayDate(collectionDates.from)} to ${displayDate(collectionDates.to)}`
-    );
+      addPdfHeader(
+        doc,
+        'COLLECTION STATEMENT',
+        `Project: ${projectData.identity.village} | Dates: ${displayDate(collectionDates.from)} to ${displayDate(collectionDates.to)}`
+      );
 
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const left = 40;
-    const bottom = pageHeight - 54;
-    const headerHeight = 24;
-    const columns = [
-      { title: 'Payment Date', x: left, width: 82, align: 'left' as const },
-      { title: 'Plot', x: left + 82, width: 48, align: 'left' as const },
-      { title: 'Customer', x: left + 130, width: 210, align: 'left' as const },
-      { title: 'Amount', x: left + 340, width: 102, align: 'right' as const },
-      { title: 'Mode', x: left + 442, width: 72, align: 'left' as const },
-    ];
-    const tableWidth = columns.reduce((sum, column) => sum + column.width, 0);
-
-    const drawTableHeader = (startY: number) => {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8);
-      doc.setTextColor(255, 255, 255);
-      doc.setFillColor(31, 41, 55);
-      doc.setDrawColor(31, 41, 55);
-      doc.setLineWidth(0.6);
-      doc.rect(left, startY, tableWidth, headerHeight, 'F');
-      columns.forEach((column) => {
-        doc.rect(column.x, startY, column.width, headerHeight, 'S');
-        const textX = column.align === 'right' ? column.x + column.width - 6 : column.x + 6;
-        doc.text(column.title, textX, startY + 15, { align: column.align });
+      autoTable(doc, {
+        startY: getPdfContentStartY(),
+        margin: { left: 40, right: 40 },
+        head: [['Payment Date', 'Plot', 'Customer', 'Amount', 'Mode']],
+        body: payments.length > 0
+          ? payments.map((payment) => [
+            displayDate(payment.paymentDate),
+            `#${payment.plotNumber}`,
+            `${payment.customerName || '-'}\n${payment.phoneNumber || '-'}`,
+            formatPdfCurrency(Number(payment.paidAmount || 0)),
+            payment.paymentMode || 'CASH',
+          ])
+          : [['No collections found for this date range.', '', '', '', '']],
+        foot: [['Total Collection', '', '', formatPdfCurrency(total), '']],
+        columnStyles: {
+          0: { cellWidth: 86 },
+          1: { cellWidth: 54, fontStyle: 'bold' },
+          2: { cellWidth: 190 },
+          3: { halign: 'right', cellWidth: 130, fontStyle: 'bold' },
+          4: { cellWidth: 55 },
+        },
+        didParseCell: (data) => {
+          if (payments.length === 0 && data.section === 'body' && data.column.index === 0) {
+            data.cell.colSpan = 5;
+            data.cell.styles.halign = 'center';
+            data.cell.styles.fontStyle = 'bold';
+          }
+          if (payments.length === 0 && data.section === 'body' && data.column.index > 0) {
+            data.cell.text = [];
+          }
+          if (data.section === 'foot' && data.column.index === 0) {
+            data.cell.colSpan = 3;
+            data.cell.styles.halign = 'right';
+          }
+          if (data.section === 'foot' && (data.column.index === 1 || data.column.index === 2)) {
+            data.cell.text = [];
+          }
+        },
       });
-      return startY + headerHeight;
-    };
 
-    const addPageWithTableHeader = () => {
-      doc.addPage();
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor(17, 24, 39);
-      doc.text('COLLECTION STATEMENT', left, 42);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.setTextColor(75, 85, 99);
-      doc.text(`${projectData.identity.village} | ${displayDate(collectionDates.from)} to ${displayDate(collectionDates.to)}`, left, 56);
-      return drawTableHeader(76);
-    };
-
-    const drawRow = (rowY: number, cells: string[], rowHeight: number, isTotal = false) => {
-      doc.setDrawColor(isTotal ? 156 : 229, isTotal ? 163 : 231, isTotal ? 175 : 235);
-      doc.setLineWidth(isTotal ? 0.8 : 0.6);
-      doc.setFillColor(isTotal ? 243 : 255, isTotal ? 244 : 255, isTotal ? 246 : 255);
-      doc.rect(left, rowY, tableWidth, rowHeight, 'F');
-
-      columns.forEach((column, index) => {
-        doc.rect(column.x, rowY, column.width, rowHeight, 'S');
-        const text = cells[index] || '';
-        const textX = column.align === 'right' ? column.x + column.width - 6 : column.x + 6;
-        doc.setFont('helvetica', isTotal || index === 3 || index === 1 ? 'bold' : 'normal');
-        doc.setFontSize(isTotal ? 9 : 8);
-        doc.setTextColor(isTotal && index === 3 ? 5 : 31, isTotal && index === 3 ? 150 : 41, isTotal && index === 3 ? 105 : 55);
-        const lines = index === 2 && !isTotal ? doc.splitTextToSize(text, column.width - 12) : [text];
-        doc.text(lines, textX, rowY + 13, { align: column.align, maxWidth: column.width - 12 });
-      });
-    };
-
-    let y = drawTableHeader(78);
-
-    if (payments.length === 0) {
-      drawRow(y, ['No collections found for this date range.', '', '', '', ''], 34);
-      y += 34;
-    } else {
-      payments.forEach((payment) => {
-        const customerText = [payment.customerName || '-', payment.phoneNumber || '-'].join('\n');
-        const customerLines = doc.splitTextToSize(customerText, columns[2].width - 12);
-        const rowHeight = Math.max(34, 12 + customerLines.length * 10);
-
-        if (y + rowHeight > bottom) {
-          y = addPageWithTableHeader();
-        }
-
-        drawRow(y, [
-          displayDate(payment.paymentDate),
-          `#${payment.plotNumber}`,
-          customerText,
-          formatCurrency(Number(payment.paidAmount || 0)),
-          payment.paymentMode || 'CASH',
-        ], rowHeight);
-        y += rowHeight;
-      });
-    }
-
-    const totalHeight = 34;
-    if (y + totalHeight > bottom) {
-      y = addPageWithTableHeader();
-    }
-
-    doc.setDrawColor(156, 163, 175);
-    doc.setFillColor(240, 253, 244);
-    doc.rect(left, y, tableWidth, totalHeight, 'F');
-    doc.rect(left, y, columns[0].width + columns[1].width + columns[2].width, totalHeight, 'S');
-    doc.rect(columns[3].x, y, columns[3].width, totalHeight, 'S');
-    doc.rect(columns[4].x, y, columns[4].width, totalHeight, 'S');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(17, 24, 39);
-    doc.text('TOTAL COLLECTION:', columns[2].x + columns[2].width - 8, y + 21, { align: 'right' });
-    doc.setTextColor(5, 150, 105);
-    doc.text(formatCurrency(total), columns[3].x + columns[3].width - 6, y + 21, { align: 'right' });
-
-    addPdfFooter(doc);
-    doc.save(`Collection_${projectData.identity.village}_${collectionDates.from}.pdf`);
+      addPdfFooter(doc);
+      doc.save(`Collection_${projectData.identity.village}_${collectionDates.from}.pdf`);
     } catch (error) {
-      console.error(error);
-      alert('Collection statement PDF failed. Please refresh and try again.');
+      failPdfDownload('Collection Statement', error);
     }
   };
 
@@ -1332,28 +1264,29 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
         const filename = `Deal_${plotNum}_${customerName}.pdf`;
         const doc = await createPdfDoc('portrait');
         if (!doc) {
-          console.error('PDF generation failed: jsPDF runtime unavailable (Plot Deal).');
-          alert('PDF generation failed. Please refresh and try again.');
+          failPdfDownload('Plot Deal', new Error('Unable to create PDF document.'));
           return;
         }
 
         try {
         addPdfHeader(doc, 'PLOT SALE AGREEMENT', `Agreement Ref: ${new Date().getFullYear()}-${plotNum} | Project: ${projectIdentity.village || 'Project'}`);
-        doc.setFontSize(9);
-        doc.setTextColor(75, 85, 99);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(55, 65, 81);
         doc.text(`Generated: ${displayDate(new Date().toISOString())}`, 430, 42);
 
         const drawBox = (x: number, y: number, w: number, h: number, title: string, lines: string[]) => {
-          doc.setDrawColor(229, 231, 235);
-          doc.setFillColor(249, 250, 251);
+          doc.setDrawColor(55, 65, 81);
+          doc.setLineWidth(0.75);
+          doc.setFillColor(248, 250, 252);
           doc.roundedRect(x, y, w, h, 4, 4, 'FD');
           doc.setFont('helvetica', 'bold');
-          doc.setFontSize(8);
-          doc.setTextColor(107, 114, 128);
-          doc.text(title.toUpperCase(), x + 12, y + 18);
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(9);
+          doc.setFontSize(8.5);
           doc.setTextColor(31, 41, 55);
+          doc.text(title.toUpperCase(), x + 12, y + 18);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(9.2);
+          doc.setTextColor(17, 24, 39);
           lines.forEach((line, idx) => doc.text(line, x + 12, y + 36 + idx * 14));
         };
 
@@ -1375,60 +1308,58 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
         drawBox(310, 78, 245, 96, 'Property Details', [
           `Plot Number: #${plotData.plotNumber}`,
           `Area: ${formatInputNumber(plotData.areaVaar)} Vaar`,
-          `Rate: ${formatCurrency(Number(plotData.customLandRate))} / vaar`,
+          `Rate: ${formatPdfCurrency(Number(plotData.customLandRate))} / vaar`,
           `Dimensions: ${plotData.dimLengthFt} x ${plotData.dimWidthFt} ft`,
         ]);
 
         autoTable(doc, {
-          ...pdfTableDefaults,
           startY: 198,
           margin: { left: 40, right: 40 },
           head: [['Gross Deal', 'Commission', 'Net Deal', 'Paid', 'Balance']],
           body: [[
-            formatCurrency(totalValue),
-            `- ${formatCurrency(commissionAmount)}`,
-            formatCurrency(netTotalValue),
-            formatCurrency(totalPaid),
-            formatCurrency(balanceDue),
+            formatPdfCurrency(totalValue),
+            `- ${formatPdfCurrency(commissionAmount)}`,
+            formatPdfCurrency(netTotalValue),
+            formatPdfCurrency(totalPaid),
+            formatPdfCurrency(balanceDue),
           ]],
           columnStyles: {
-            0: { halign: 'right' },
-            1: { halign: 'right' },
-            2: { halign: 'right' },
-            3: { halign: 'right' },
-            4: { halign: 'right' },
+            0: { halign: 'right', cellWidth: 103, fontStyle: 'bold' },
+            1: { halign: 'right', cellWidth: 103, fontStyle: 'bold' },
+            2: { halign: 'right', cellWidth: 103, fontStyle: 'bold' },
+            3: { halign: 'right', cellWidth: 103, fontStyle: 'bold' },
+            4: { halign: 'right', cellWidth: 103, fontStyle: 'bold' },
           },
         });
 
-        const scheduleStartY = ((doc as any).lastAutoTable?.finalY || 250) + 24;
+        const scheduleStartY = getPdfNextY(doc, 250) + 6;
         let runningBalance = netTotalValue;
         const scheduleRows = deal.schedule.map((item) => {
           if (item.isPaid) runningBalance -= Number(item.paidAmount);
           return [
             item.label,
             displayDate(item.dueDate),
-            formatCurrency(item.expectedAmount),
-            item.isPaid ? formatCurrency(Number(item.paidAmount)) : '-',
-            item.isPaid ? formatCurrency(runningBalance) : '-',
+            formatPdfCurrency(item.expectedAmount),
+            item.isPaid ? formatPdfCurrency(Number(item.paidAmount)) : '-',
+            item.isPaid ? formatPdfCurrency(runningBalance) : '-',
             item.isPaid ? [item.paymentMode || 'CASH', item.paymentMode === 'BANK' ? `${item.bankName || ''} #${item.refNumber || ''}` : '', item.remarks || ''].filter(Boolean).join('\n') : 'Pending',
           ];
         });
 
         autoTable(doc, {
-          ...pdfTableDefaults,
           startY: scheduleStartY,
           margin: { left: 40, right: 40 },
           head: [['Description', 'Due Date', 'Due Amount', 'Paid Amount', 'Balance', 'Ref / Remarks']],
           body: scheduleRows,
-          foot: [['Total', '', formatCurrency(netTotalValue), formatCurrency(totalPaid), formatCurrency(balanceDue), '']],
+          foot: [['Total', '', formatPdfCurrency(netTotalValue), formatPdfCurrency(totalPaid), formatPdfCurrency(balanceDue), '']],
           showFoot: 'lastPage',
           columnStyles: {
-            0: { cellWidth: 100 },
-            1: { cellWidth: 72 },
-            2: { halign: 'right', cellWidth: 78 },
-            3: { halign: 'right', cellWidth: 78 },
-            4: { halign: 'right', cellWidth: 78 },
-            5: { cellWidth: 110 },
+            0: { cellWidth: 82 },
+            1: { cellWidth: 62 },
+            2: { halign: 'right', cellWidth: 104, fontStyle: 'bold', fontSize: 8.1 },
+            3: { halign: 'right', cellWidth: 104, fontStyle: 'bold', fontSize: 8.1 },
+            4: { halign: 'right', cellWidth: 104, fontStyle: 'bold', fontSize: 8.1 },
+            5: { cellWidth: 59, fontSize: 8 },
           },
         });
 
@@ -1452,8 +1383,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
         addPdfFooter(doc);
         doc.save(filename);
         } catch (error) {
-          console.error('PDF generation failed (Plot Deal):', error);
-          alert('PDF generation failed. Please check data and try again.');
+          failPdfDownload('Plot Deal', error);
         }
     };
 

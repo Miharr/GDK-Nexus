@@ -1,178 +1,200 @@
-type PdfOrientation = 'portrait' | 'landscape';
+import { jsPDF } from 'jspdf';
+import runAutoTable, { type UserOptions } from 'jspdf-autotable';
 
-const loadedScripts = new Map<string, Promise<void>>();
-
-const loadScript = (src: string) => {
-  if (typeof window === 'undefined') return Promise.resolve();
-  if (loadedScripts.has(src)) return loadedScripts.get(src)!;
-
-  const promise = new Promise<void>((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = src;
-    script.async = true;
-    script.onload = () => {
-      script.dataset.loaded = 'true';
-      resolve();
-    };
-    script.onerror = () => {
-      loadedScripts.delete(src);
-      reject(new Error(`Failed to load ${src}`));
-    };
-    document.head.appendChild(script);
-  });
-
-  loadedScripts.set(src, promise);
-  return promise;
+export type PdfOrientation = 'portrait' | 'landscape';
+export type PdfDoc = jsPDF & {
+  lastAutoTable?: {
+    finalY?: number;
+  };
 };
 
-const ensurePdfRuntime = async (requireAutoTable = true) => {
-  const win = window as any;
-  if (!win.jspdf?.jsPDF) {
-    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
-  }
-
-  if (!win.jspdf?.jsPDF) {
-    throw new Error('PDF engine failed to load.');
-  }
-
-  if (!requireAutoTable) return;
-
-  const probe = new win.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
-  if (typeof probe.autoTable !== 'function' && !win.jspdfAutoTable?.default && !win.jspdfAutoTable && !win.autoTable) {
-    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js');
-  }
-
-  const testDoc = new win.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
-  if (typeof testDoc.autoTable !== 'function' && !win.jspdfAutoTable?.default && !win.jspdfAutoTable && !win.autoTable) {
-    throw new Error('PDF table engine failed to load.');
-  }
+const PAGE_MARGIN = {
+  top: 76,
+  right: 40,
+  bottom: 48,
+  left: 40,
 };
 
-export const createPdfDoc = async (orientation: PdfOrientation = 'portrait', requireAutoTable = true) => {
+const COLORS = {
+  ink: [15, 23, 42] as [number, number, number],
+  muted: [51, 65, 85] as [number, number, number],
+  border: [71, 85, 105] as [number, number, number],
+  softBorder: [148, 163, 184] as [number, number, number],
+  appBg: [241, 245, 249] as [number, number, number],
+  orange: [249, 115, 22] as [number, number, number],
+  orangeDark: [234, 88, 12] as [number, number, number],
+  orangeSoft: [255, 247, 237] as [number, number, number],
+  headerFill: [30, 41, 59] as [number, number, number],
+  sectionFill: [241, 245, 249] as [number, number, number],
+  white: [255, 255, 255] as [number, number, number],
+};
+
+export const createPdfDoc = async (orientation: PdfOrientation = 'portrait', _requireAutoTable = true): Promise<PdfDoc | null> => {
   try {
-    await ensurePdfRuntime(requireAutoTable);
-    const JsPDF = (window as any).jspdf.jsPDF;
-    return new JsPDF({ orientation, unit: 'pt', format: 'a4' });
+    const doc = new jsPDF({ orientation, unit: 'pt', format: 'a4', compress: true }) as PdfDoc;
+    doc.setProperties({
+      title: 'GDK Nexus Report',
+      subject: 'Print-ready GDK Nexus PDF export',
+      creator: 'GDK Nexus 2442',
+    });
+    return doc;
   } catch (error) {
-    console.error(error);
+    console.error('PDF generation failed: unable to create jsPDF document.', error);
     return null;
   }
 };
 
-export const downloadHtmlPdf = async (
-  elementId: string,
-  filename: string,
-  orientation: PdfOrientation = 'portrait',
-  margin: number | number[] = 0.5
-) => {
-  try {
-    const win = window as any;
-    if (!win.html2pdf) {
-      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js');
-    }
+export const getPdfContentStartY = () => PAGE_MARGIN.top;
 
-    if (!win.html2pdf) {
-      alert('PDF download engine could not load. Please refresh and try again.');
-      return false;
-    }
-
-    const element = document.getElementById(elementId);
-    if (!element) {
-      alert('PDF template was not found. Please refresh and try again.');
-      return false;
-    }
-
-    element.style.display = 'block';
-    try {
-      await win.html2pdf().set({
-        margin,
-        filename,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-        jsPDF: { unit: 'in', format: 'a4', orientation },
-        pagebreak: { mode: ['avoid-all', 'css', 'legacy'], avoid: ['tr', '.pdf-row', '.pdf-card'] },
-      }).from(element).save();
-    } finally {
-      element.style.display = 'none';
-    }
-    return true;
-  } catch (error) {
-    console.error(error);
-    alert('PDF download failed. Please refresh and try again.');
-    return false;
-  }
+export const getPdfNextY = (doc: PdfDoc, fallback = PAGE_MARGIN.top) => {
+  return (doc.lastAutoTable?.finalY || fallback) + 18;
 };
 
-export const autoTable = (doc: any, options: Record<string, unknown>) => {
-  const win = window as any;
-  if (typeof doc.autoTable === 'function') {
-    doc.autoTable(options);
-    return;
+export const formatPdfCurrency = (value: number | string) => {
+  const raw = typeof value === 'number'
+    ? value
+    : Number(
+      value
+        .replace(/₹|â‚¹|Rs\.?|INR/gi, '')
+        .replace(/,/g, '')
+        .replace(/[^\d.-]/g, '')
+    );
+
+  if (Number.isFinite(raw)) {
+    return `Rs. ${new Intl.NumberFormat('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(raw)}`;
   }
 
-  const tableFn = win.jspdfAutoTable?.default || win.jspdfAutoTable || win.autoTable;
-  if (typeof tableFn !== 'function') {
-    throw new Error('PDF table engine is unavailable.');
-  }
-  tableFn(doc, options);
+  return String(value)
+    .replace(/₹|â‚¹/g, 'Rs.')
+    .replace(/\s+/g, ' ')
+    .trim();
 };
 
-export const pdfTableDefaults = {
+export const pdfTableDefaults: UserOptions = {
   theme: 'grid',
   showHead: 'everyPage',
+  showFoot: 'lastPage',
+  pageBreak: 'auto',
   rowPageBreak: 'avoid',
-  tableLineWidth: 1,
-  tableLineColor: [17, 24, 39],
+  margin: PAGE_MARGIN,
+  tableLineColor: COLORS.border,
+  tableLineWidth: 0.9,
   styles: {
-    fontSize: 9,
-    cellPadding: 6,
+    font: 'helvetica',
+    fontStyle: 'normal',
+    fontSize: 8.7,
+    cellPadding: { top: 6, right: 8, bottom: 6, left: 8 },
     overflow: 'linebreak',
     valign: 'middle',
-    lineColor: [55, 65, 81],
-    lineWidth: 0.9,
-    textColor: [17, 24, 39],
-    fontStyle: 'normal',
+    lineColor: COLORS.border,
+    lineWidth: 0.65,
+    textColor: COLORS.ink,
   },
   headStyles: {
-    fillColor: [17, 24, 39],
-    textColor: [255, 255, 255],
-    lineColor: [17, 24, 39],
-    lineWidth: 1.1,
+    fillColor: COLORS.headerFill,
+    textColor: COLORS.white,
+    lineColor: COLORS.headerFill,
+    lineWidth: 0.8,
     fontStyle: 'bold',
+    fontSize: 8.4,
+  },
+  bodyStyles: {
+    fillColor: COLORS.white,
+    textColor: COLORS.ink,
+  },
+  alternateRowStyles: {
+    fillColor: COLORS.appBg,
   },
   footStyles: {
-    fillColor: [229, 231, 235],
-    textColor: [17, 24, 39],
-    lineColor: [31, 41, 55],
-    lineWidth: 1,
+    fillColor: COLORS.orangeSoft,
+    textColor: COLORS.ink,
+    lineColor: COLORS.orangeDark,
+    lineWidth: 0.8,
     fontStyle: 'bold',
+    fontSize: 8.8,
   },
-} as const;
+};
 
-export const addPdfHeader = (doc: any, title: string, subtitle?: string) => {
+export const autoTable = (doc: PdfDoc, options: UserOptions) => {
+  runAutoTable(doc, {
+    ...pdfTableDefaults,
+    ...options,
+    styles: {
+      ...pdfTableDefaults.styles,
+      ...options.styles,
+    },
+    headStyles: {
+      ...pdfTableDefaults.headStyles,
+      ...options.headStyles,
+    },
+    bodyStyles: {
+      ...pdfTableDefaults.bodyStyles,
+      ...options.bodyStyles,
+    },
+    alternateRowStyles: {
+      ...pdfTableDefaults.alternateRowStyles,
+      ...options.alternateRowStyles,
+    },
+    footStyles: {
+      ...pdfTableDefaults.footStyles,
+      ...options.footStyles,
+    },
+    margin: {
+      ...PAGE_MARGIN,
+      ...(typeof options.margin === 'object' && !Array.isArray(options.margin) ? options.margin : {}),
+    },
+  });
+};
+
+export const addPdfHeader = (doc: PdfDoc, title: string, subtitle?: string) => {
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  doc.setFillColor(...COLORS.headerFill);
+  doc.rect(0, 0, pageWidth, 18, 'F');
+  doc.setFillColor(...COLORS.orange);
+  doc.rect(0, 18, pageWidth, 4, 'F');
+  doc.setFillColor(...COLORS.orangeSoft);
+  doc.roundedRect(PAGE_MARGIN.left, 30, 8, 28, 2, 2, 'F');
+
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
-  doc.setTextColor(17, 24, 39);
-  doc.text(title, 40, 42);
+  doc.setTextColor(...COLORS.ink);
+  doc.text(title, PAGE_MARGIN.left + 16, 40, { maxWidth: pageWidth - PAGE_MARGIN.left - PAGE_MARGIN.right - 16 });
 
   if (subtitle) {
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.setTextColor(31, 41, 55);
-    doc.text(subtitle, 40, 58);
+    doc.setFontSize(9);
+    doc.setTextColor(...COLORS.muted);
+    doc.text(subtitle, PAGE_MARGIN.left + 16, 56, { maxWidth: pageWidth - PAGE_MARGIN.left - PAGE_MARGIN.right - 16 });
   }
+
+  doc.setDrawColor(...COLORS.orange);
+  doc.setLineWidth(1.1);
+  doc.line(PAGE_MARGIN.left, 66, pageWidth - PAGE_MARGIN.right, 66);
 };
 
-export const addPdfFooter = (doc: any) => {
+export const addPdfFooter = (doc: PdfDoc) => {
   const pageCount = doc.internal.getNumberOfPages();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+
   for (let page = 1; page <= pageCount; page++) {
     doc.setPage(page);
+    doc.setDrawColor(...COLORS.orange);
+    doc.setLineWidth(0.8);
+    doc.line(PAGE_MARGIN.left, pageHeight - 34, pageWidth - PAGE_MARGIN.right, pageHeight - 34);
+    doc.setFont('helvetica', 'bold');
     doc.setFontSize(8);
-    doc.setTextColor(107, 114, 128);
-    doc.text(`Page ${page} of ${pageCount}`, doc.internal.pageSize.getWidth() - 84, doc.internal.pageSize.getHeight() - 24);
+    doc.setTextColor(...COLORS.muted);
+    doc.text('GDK NEXUS 2442', PAGE_MARGIN.left, pageHeight - 20);
+    doc.text(`Page ${page} of ${pageCount}`, pageWidth - PAGE_MARGIN.right, pageHeight - 20, { align: 'right' });
   }
 };
 
-if (typeof window !== 'undefined') {
-  void ensurePdfRuntime().catch(() => undefined);
-}
+export const failPdfDownload = (label: string, error: unknown) => {
+  console.error(`PDF generation failed (${label}):`, error);
+  alert(`${label} PDF generation failed. No file was downloaded. Please check the data and try again.`);
+};
