@@ -40,10 +40,8 @@ import {
   formatInputNumber,
   parseInputNumber
 } from '../utils/formatters';
+import { addPdfFooter, addPdfHeader, autoTable, createPdfDoc, failPdfDownload, formatPdfCurrency, getPdfContentStartY, getPdfNextY } from '../utils/pdf';
 import { supabase } from '../supabaseClient';
-
-// Declare html2pdf for TypeScript
-declare var html2pdf: any;
 
 const CONVERSION_RATES = {
   Vigha: 1,
@@ -404,51 +402,145 @@ const handleClear = () => {
     }
   };
 
- const handleDownloadPDF = () => {
-    const element = document.getElementById('pdf-template');
-    if (!element) return;
-    
-    // Ensure specific print styles are applied
-    element.style.display = 'block'; 
-    
+ const handleDownloadPDF = async () => {
+    if (!result) return;
     const villageName = identity.village ? identity.village.replace(/\s+/g, '_') : 'Village';
     const fpNumber = identity.fpNumber ? identity.fpNumber.replace(/\s+/g, '') : 'FP';
+    const filename = `GDK_NEXUS_${villageName}_FP${fpNumber}.pdf`;
+    const doc = await createPdfDoc('portrait');
+    if (!doc) {
+      failPdfDownload('Land Cost Sheet', new Error('Unable to create PDF document.'));
+      return;
+    }
 
-    const opt = {
-      margin: [0.3, 0.3, 0.3, 0.3], // Top, Left, Bottom, Right
-      filename: `GDK_NEXUS_${villageName}_FP${fpNumber}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } // Smart pagination avoids cutting tables/text
-    };
+    try {
+    const currentLandedCost = costSheetBasis === '100' ? result.landedCost100 : result.landedCost60;
+    const currentStampDuty = costSheetBasis === '100' ? result.stampDuty100 : result.stampDuty60;
+    const currentJantriDisplay = costSheetBasis === '100' ? result.totalJantriValue : result.fpJantriValue;
+    const getNum = (val: number | string) => (val === '' ? 0 : Number(val));
+    const calculatedDealPrice = getNum(financials.pricePerVigha) * (
+      financials.priceBasis === 'Vaar'
+        ? result.inputInVigha * CONVERSION_RATES.Vaar * 0.60
+        : result.inputInVigha
+    );
 
-    html2pdf().set(opt).from(element).save().then(() => {
-       element.style.display = 'none'; 
+    addPdfHeader(doc, 'GDK NEXUS LAND COST SHEET', `Project: ${identity.village || 'Unnamed Project'} | TP: ${identity.tpScheme || '-'} | FP: ${identity.fpNumber || '-'}`);
+
+    autoTable(doc, {
+      startY: getPdfContentStartY(),
+      margin: { left: 40, right: 40 },
+      head: [['Project Identity', 'Value']],
+      body: [
+        ['Village', identity.village || '-'],
+        ['TP Scheme', identity.tpScheme || '-'],
+        ['FP Number', identity.fpNumber || '-'],
+        ['Block / Survey Number', identity.blockSurveyNumber || '-'],
+      ],
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 170 } },
     });
+
+    autoTable(doc, {
+      startY: getPdfNextY(doc, 130),
+      margin: { left: 40, right: 40 },
+      head: [['Land / Jantri Metrics', 'Value']],
+      body: [
+        ['Input Area', `${formatInputNumber(measurements.areaInput)} ${measurements.inputUnit}`],
+        ['Total Area', `${formatInputNumber(result.totalSqMt)} SqMt / ${formatInputNumber(result.inputInVigha)} Vigha`],
+        ['FP Area (60%)', `${formatInputNumber(result.fpAreaSqMt)} SqMt / ${formatInputNumber(result.fpInVigha)} Vigha`],
+        ['Jantri Rate', `${formatPdfCurrency(getNum(measurements.jantriRate))} / SqMt`],
+        [`Jantri Value (${costSheetBasis}% basis)`, formatPdfCurrency(currentJantriDisplay)],
+      ],
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 220 }, 1: { cellWidth: 295 } },
+    });
+
+    const costRows = [
+      ['Land Deal Price', formatPdfCurrency(calculatedDealPrice)],
+      [`Stamp Duty & Registration (${costSheetBasis}% basis)`, formatPdfCurrency(currentStampDuty)],
+      ['Architect Fees', formatPdfCurrency(getNum(overheads.architectFees))],
+      ['Plan Pass Fees', formatPdfCurrency(getNum(overheads.planPassFees))],
+      ['NA Expense', formatPdfCurrency(getNum(overheads.naExpense))],
+      ['NA Premium', formatPdfCurrency(getNum(overheads.naPremium))],
+      ['Development Cost', formatPdfCurrency(getNum(overheads.developmentCost))],
+      ...(overheads.customExpenses || []).map((item: any) => [item.name || 'Extra Expense', formatPdfCurrency(getNum(item.amount))]),
+    ].filter((row) => row[1] !== formatPdfCurrency(0));
+
+    autoTable(doc, {
+      startY: getPdfNextY(doc, 250),
+      margin: { left: 40, right: 40 },
+      head: [['Cost Breakdown', 'Amount']],
+      body: costRows,
+      foot: [['Final Project Cost', formatPdfCurrency(currentLandedCost)]],
+      showFoot: 'lastPage',
+      columnStyles: { 0: { cellWidth: 365 }, 1: { halign: 'right', cellWidth: 150, fontStyle: 'bold' } },
+    });
+
+    autoTable(doc, {
+      startY: getPdfNextY(doc, 380),
+      margin: { left: 40, right: 40 },
+      head: [['#', 'Description', 'Due Date', 'Amount']],
+      body: result.schedule.map((item, index) => [
+        `${index + 1}`,
+        item.description,
+        item.date,
+        formatPdfCurrency(item.amount),
+      ]),
+      foot: [['', 'Total Payable to Land Owner', '', formatPdfCurrency(result.grandTotalPayment)]],
+      showFoot: 'lastPage',
+      columnStyles: {
+        0: { cellWidth: 34, halign: 'center' },
+        1: { cellWidth: 258 },
+        2: { cellWidth: 88 },
+        3: { halign: 'right', cellWidth: 135, fontStyle: 'bold' },
+      },
+    });
+
+    addPdfFooter(doc);
+    doc.save(filename);
+    } catch (error) {
+      failPdfDownload('Land Cost Sheet', error);
+    }
  };
 
-  const handleDownloadLedgerPDF = () => {
-    const element = document.getElementById('ledger-pdf-template');
-    if (!element) return;
-    
-    element.style.display = 'block'; 
-    
+  const handleDownloadLedgerPDF = async () => {
     const villageName = identity.village ? identity.village.replace(/\s+/g, '_') : 'Village';
     const fromDate = new Date(ledgerRange.from).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
     const toDate = new Date(ledgerRange.to).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    const filename = `LEDGER_${villageName}_${fromDate}_to_${toDate}.pdf`;
+    const doc = await createPdfDoc('portrait');
+    if (!doc) {
+      failPdfDownload('Ledger Statement', new Error('Unable to create PDF document.'));
+      return;
+    }
 
-    const opt = {
-      margin: [0.5, 0.5, 0.5, 0.5],
-      filename: `LEDGER_${villageName}_${fromDate}_to_${toDate}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-    };
+    try {
+    const transactions = getFilteredLedger();
+    const total = transactions.reduce((sum, item) => sum + item.amount, 0);
 
-    html2pdf().set(opt).from(element).save().then(() => {
-       element.style.display = 'none'; 
+    addPdfHeader(doc, 'EXPENSE LEDGER STATEMENT', `Project: ${identity.village || 'Unnamed Project'} | Period: ${fromDate} to ${toDate}`);
+
+    autoTable(doc, {
+      startY: getPdfContentStartY(),
+      margin: { left: 40, right: 40 },
+      head: [['Date', 'Description / Expense Name', 'Amount']],
+      body: transactions.map((item) => [
+        new Date(`${item.date}T12:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+        item.name,
+        formatPdfCurrency(item.amount),
+      ]),
+      foot: [['', 'Grand Total for Period', formatPdfCurrency(total)]],
+      showFoot: 'lastPage',
+      columnStyles: {
+        0: { cellWidth: 95 },
+        1: { cellWidth: 270 },
+        2: { halign: 'right', cellWidth: 150, fontStyle: 'bold' },
+      },
     });
+
+    addPdfFooter(doc);
+    doc.save(filename);
+    } catch (error) {
+      failPdfDownload('Ledger Statement', error);
+    }
   };
 
   // Reactive Handlers
@@ -1451,27 +1543,27 @@ const handleDpAmountChange = (val: string) => {
                   <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '10px', fontSize: '11px' }}>
                      <tbody>
                        {/* 1. Stamp Duty */}
-                       <tr>
+                       <tr className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                           <td style={{ padding: '6px 0', borderBottom: '1px solid #e5e7eb', fontWeight: 'bold', color: '#000000' }}>1. Stamp Duty & Registration ({costSheetBasis === '100' ? '100% Land' : '60% FP'})</td>
                           <td style={{ textAlign: 'right', fontWeight: 'bold', borderBottom: '1px solid #e5e7eb', color: '#000000' }}>{formatCurrency(currentStampDuty)}</td>
                        </tr>
                        
                        {/* 2. Additional Expenses Header */}
-                       <tr>
+                       <tr className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                           <td colSpan={2} style={{ padding: '8px 0 4px', fontWeight: 'bold', color: '#333333', fontSize: '10px', textTransform: 'uppercase' }}>2. Additional Expenses Breakdown</td>
                        </tr>
 
                        {/* List of Extras */}
-                       {getNum(overheads.architectFees) > 0 && <tr><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>Architect Fees</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.architectFees))}</td></tr>}
-                       {getNum(overheads.planPassFees) > 0 && <tr><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>Plan Pass Fees</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.planPassFees))}</td></tr>}
-                       {getNum(overheads.naExpense) > 0 && <tr><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>NA Expense</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.naExpense))}</td></tr>}
-                       {getNum(overheads.naPremium) > 0 && <tr><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>NA Premium</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.naPremium))}</td></tr>}
-                       {getNum(overheads.developmentCost) > 0 && <tr><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>Development Cost</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.developmentCost))}</td></tr>}
+                       {getNum(overheads.architectFees) > 0 && <tr className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>Architect Fees</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.architectFees))}</td></tr>}
+                       {getNum(overheads.planPassFees) > 0 && <tr className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>Plan Pass Fees</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.planPassFees))}</td></tr>}
+                       {getNum(overheads.naExpense) > 0 && <tr className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>NA Expense</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.naExpense))}</td></tr>}
+                       {getNum(overheads.naPremium) > 0 && <tr className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>NA Premium</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.naPremium))}</td></tr>}
+                       {getNum(overheads.developmentCost) > 0 && <tr className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}><td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>Development Cost</td><td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(overheads.developmentCost))}</td></tr>}
                        
                        {/* Custom Expenses List in PDF */}
                        {(overheads.customExpenses || []).map(item => (
                           getNum(item.amount) > 0 && (
-                            <tr key={item.id}>
+                            <tr key={item.id} className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                               <td style={{ padding: '4px 0 4px 15px', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{item.name || 'Extra Expense'}</td>
                               <td style={{ textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#333333' }}>{formatCurrency(Number(item.amount))}</td>
                             </tr>
@@ -1479,19 +1571,19 @@ const handleDpAmountChange = (val: string) => {
                        ))}
 
                        {/* Total Additional Expenses Subtotal */}
-                       <tr style={{ backgroundColor: '#f9fafb' }}>
+                       <tr className="pdf-row" style={{ backgroundColor: '#f9fafb', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                           <td style={{ padding: '6px 8px', fontWeight: 'bold', color: '#4b5563', fontSize: '11px' }}>Total Additional Expenses</td>
                           <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 'bold', color: '#4b5563', fontSize: '11px' }}>{formatCurrency(result.totalAdditionalExpenses)}</td>
                        </tr>
 
                        {/* Grand Total */}
-                       <tr style={{ backgroundColor: '#fff7ed', borderTop: '2px solid #ea580c' }}>
+                       <tr className="pdf-row" style={{ backgroundColor: '#fff7ed', borderTop: '2px solid #ea580c', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                           <td style={{ padding: '12px 8px', fontWeight: 'bold', color: '#c2410c', fontSize: '12px' }}>FINAL PROJECT COST ({costSheetBasis}%)</td>
                           <td style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 'bold', color: '#c2410c', fontSize: '14px' }}>{formatCurrency(currentLandedCost)}</td>
                        </tr>
                        
                        {/* Total Project Cost */}
-                       <tr style={{ backgroundColor: '#fff7ed', borderTop: '2px solid #ea580c' }}>
+                       <tr className="pdf-row" style={{ backgroundColor: '#fff7ed', borderTop: '2px solid #ea580c', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                           <td style={{ padding: '12px 8px', fontWeight: 'bold', color: '#c2410c', fontSize: '12px' }}>TOTAL PROJECT COST ({costSheetBasis}%)</td>
                           <td style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 'bold', color: '#c2410c', fontSize: '14px' }}>{formatCurrency(currentLandedCost)}</td>
                        </tr>
@@ -1517,14 +1609,14 @@ const handleDpAmountChange = (val: string) => {
                      </thead>
                      <tbody>
                        {result.schedule.map((item, i) => (
-                         <tr key={item.id} style={{ pageBreakInside: 'avoid' }}>
+                         <tr key={item.id} className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                             <td style={{ padding: '8px', borderBottom: '1px solid #9ca3af', width: '30px' }}>{i+1}</td>
                             <td style={{ padding: '8px', borderBottom: '1px solid #9ca3af' }}>{item.description}</td>
                             <td style={{ padding: '8px', borderBottom: '1px solid #9ca3af' }}>{item.date}</td>
                             <td style={{ padding: '8px', borderBottom: '1px solid #9ca3af', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(item.amount)}</td>
                          </tr>
                        ))}
-                       <tr style={{ backgroundColor: '#f3f4f6', fontWeight: 'bold', pageBreakInside: 'avoid' }}>
+                       <tr className="pdf-row" style={{ backgroundColor: '#f3f4f6', fontWeight: 'bold', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                          <td colSpan={3} style={{ padding: '10px', borderBottom: '1px solid #9ca3af', textTransform: 'uppercase', color: '#000000' }}>Total Payable to Land Owner</td>
                          <td style={{ padding: '10px', borderBottom: '1px solid #9ca3af', textAlign: 'right', color: '#000000' }}>{formatCurrency(result.grandTotalPayment)}</td>
                        </tr>
@@ -1681,7 +1773,7 @@ const handleDpAmountChange = (val: string) => {
         {/* Ledger Table */}
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
           <thead>
-            <tr style={{ backgroundColor: '#f1f5f9' }}>
+            <tr className="pdf-row" style={{ backgroundColor: '#f1f5f9', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
               <th style={{ padding: '12px 10px', textAlign: 'left', borderBottom: '2px solid #cbd5e1', color: '#475569', width: '20%' }}>Date</th>
               <th style={{ padding: '12px 10px', textAlign: 'left', borderBottom: '2px solid #cbd5e1', color: '#475569', width: '55%' }}>Description / Expense Name</th>
               <th style={{ padding: '12px 10px', textAlign: 'right', borderBottom: '2px solid #cbd5e1', color: '#475569', width: '25%' }}>Amount (₹)</th>
@@ -1690,7 +1782,7 @@ const handleDpAmountChange = (val: string) => {
           <tbody>
             {getFilteredLedger().length > 0 ? (
               getFilteredLedger().map((t, i) => (
-                <tr key={i} style={{ pageBreakInside: 'avoid' }}>
+                <tr key={i} className="pdf-row" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                   <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9', color: '#64748b' }}>
                     {new Date(`${t.date}T12:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                   </td>
@@ -1711,7 +1803,7 @@ const handleDpAmountChange = (val: string) => {
             )}
           </tbody>
           <tfoot>
-            <tr style={{ backgroundColor: '#f8fafc' }}>
+            <tr className="pdf-row" style={{ backgroundColor: '#f8fafc', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
               <td colSpan={2} style={{ padding: '15px 10px', textAlign: 'right', fontWeight: 'bold', fontSize: '12px', color: '#334155', borderTop: '2px solid #cbd5e1' }}>
                 GRAND TOTAL FOR PERIOD
               </td>

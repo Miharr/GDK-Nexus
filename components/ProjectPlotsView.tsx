@@ -23,10 +23,8 @@ import {
 } from 'lucide-react';
 import { ProjectSavedState } from '../types';
 import { formatCurrency, formatInputNumber, parseInputNumber } from '../utils/formatters';
+import { addPdfFooter, addPdfHeader, autoTable, createPdfDoc, failPdfDownload, formatPdfCurrency, getPdfContentStartY, getPdfNextY } from '../utils/pdf';
 import { supabase } from '../supabaseClient';
-
-// Declare html2pdf for TypeScript
-declare var html2pdf: any;
 
 const CONVERSION_RATES: any = {
   Vigha: 1,
@@ -176,24 +174,170 @@ const [showReportPreview, setShowReportPreview] = useState(false);
     }
   };
 
-  // --- NEW: GENERATE PROJECT REPORT ---
-  const handleGenerateProjectReport = () => {
-    const element = document.getElementById('project-report-template');
-    if (!element) return;
-    element.style.display = 'block';
+  const handleGenerateProjectReport = async () => {
+    const doc = await createPdfDoc('landscape');
+    if (!doc) {
+      failPdfDownload('Project Report', new Error('Unable to create PDF document.'));
+      return;
+    }
 
-    const opt = {
-      margin: [0.3, 0.3, 0.3, 0.3],
-      filename: `Project_Report_${projectData.identity.village}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-      jsPDF: { unit: 'in', format: 'a4', orientation: 'landscape' }, // Landscape for wide table
-      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
-    };
+    try {
+    const m = projectData.measurements;
+    let baseVal = 0;
+    let baseUnit = 'Vaar';
+    if (m.plottedArea && Number(m.plottedArea) > 0) {
+      baseVal = Number(m.plottedArea);
+      baseUnit = m.plottedUnit || 'Vaar';
+    } else {
+      const inputVal = Number(m.areaInput) || 0;
+      const valInVigha = m.inputUnit === 'Vigha' ? inputVal : inputVal / CONVERSION_RATES[m.inputUnit || 'Vigha'];
+      baseVal = valInVigha * 0.60;
+      baseUnit = 'Vigha';
+    }
 
-    html2pdf().set(opt).from(element).save().then(() => {
-       element.style.display = 'none'; 
+    const areaInVaar = baseVal * (CONVERSION_RATES.Vaar / CONVERSION_RATES[baseUnit]);
+    const projectEstSale = areaInVaar * ((Number(data.landRate) || 0) + (Number(data.devRate) || 0));
+    const sortedPlots = [...filteredPlots].sort((a: any, b: any) => String(a.plotNumber || '').localeCompare(String(b.plotNumber || ''), undefined, { numeric: true }));
+
+    let gTotalGross = 0;
+    let gTotalComm = 0;
+    let gTotalNet = 0;
+    let gTotalRec = 0;
+    let gTotalPend = 0;
+
+    const rows = sortedPlots.map((plot: any) => {
+      const area = Number(plot.areaVaar) || 0;
+      const pLandRate = Number(plot.customLandRate) || landRate;
+      const grossVal = area * (pLandRate + devRate);
+      const landVal = area * pLandRate;
+      const deal = plot.dealStructure || {};
+      const commission = deal.agentCommissionType === 'percent'
+        ? Math.round(landVal * ((Number(deal.agentCommission) || 0) / 100))
+        : (Number(deal.agentCommission) || 0);
+      const netVal = grossVal - commission;
+      const received = (deal.schedule || []).reduce((sum: number, item: any) => sum + (item.isPaid ? Number(item.paidAmount) : 0), 0);
+      const pending = netVal - received;
+
+      gTotalGross += grossVal;
+      gTotalComm += commission;
+      gTotalNet += netVal;
+      gTotalRec += received;
+      gTotalPend += pending;
+
+      return [
+        `#${plot.plotNumber}`,
+        `${plot.customerName || '-'}\n${plot.phoneNumber || '-'}`,
+        `${formatInputNumber(area)} Vaar`,
+        formatPdfCurrency(grossVal),
+        commission > 0 ? formatPdfCurrency(commission) : '-',
+        formatPdfCurrency(netVal),
+        formatPdfCurrency(received),
+        formatPdfCurrency(pending),
+      ];
     });
+
+    addPdfHeader(doc, `PROJECT SALES REPORT: ${projectData.identity.village}`, `Estimated sale: ${formatPdfCurrency(projectEstSale)} | Sold gross: ${formatPdfCurrency(gTotalGross)} | Unsold value: ${formatPdfCurrency(projectEstSale - gTotalGross)}`);
+    autoTable(doc, {
+      startY: getPdfContentStartY(),
+      margin: { left: 28, right: 28 },
+      head: [['Plot', 'Customer', 'Size', 'Gross Value', 'Commission', 'Net Deal', 'Received', 'Pending']],
+      body: rows,
+      foot: [['Grand Totals', '', '', formatPdfCurrency(gTotalGross), formatPdfCurrency(gTotalComm), formatPdfCurrency(gTotalNet), formatPdfCurrency(gTotalRec), formatPdfCurrency(gTotalPend)]],
+      showFoot: 'lastPage',
+      columnStyles: {
+        0: { cellWidth: 42 },
+        1: { cellWidth: 118 },
+        2: { halign: 'right', cellWidth: 64 },
+        3: { halign: 'right', cellWidth: 112, fontStyle: 'bold' },
+        4: { halign: 'right', cellWidth: 100, fontStyle: 'bold' },
+        5: { halign: 'right', cellWidth: 112, fontStyle: 'bold' },
+        6: { halign: 'right', cellWidth: 112, fontStyle: 'bold' },
+        7: { halign: 'right', cellWidth: 112, fontStyle: 'bold' },
+      },
+    });
+    addPdfFooter(doc);
+    doc.save(`Project_Report_${projectData.identity.village}.pdf`);
+    } catch (error) {
+      failPdfDownload('Project Report', error);
+    }
+  };
+
+  const handleGenerateCollectionStatement = async () => {
+    const doc = await createPdfDoc('portrait');
+    if (!doc) {
+      failPdfDownload('Collection Statement', new Error('Unable to create PDF document.'));
+      return;
+    }
+
+    try {
+      const payments: any[] = [];
+      plots.forEach((plot: any) => {
+        (plot.dealStructure?.schedule || []).forEach((installment: any) => {
+          if (installment.isPaid && installment.paymentDate >= collectionDates.from && installment.paymentDate <= collectionDates.to) {
+            payments.push({
+              ...installment,
+              plotNumber: plot.plotNumber,
+              customerName: plot.customerName,
+              phoneNumber: plot.phoneNumber,
+            });
+          }
+        });
+      });
+
+      payments.sort((a, b) => a.paymentDate.localeCompare(b.paymentDate));
+      const total = payments.reduce((sum, item) => sum + Number(item.paidAmount || 0), 0);
+
+      addPdfHeader(
+        doc,
+        'COLLECTION STATEMENT',
+        `Project: ${projectData.identity.village} | Dates: ${displayDate(collectionDates.from)} to ${displayDate(collectionDates.to)}`
+      );
+
+      autoTable(doc, {
+        startY: getPdfContentStartY(),
+        margin: { left: 40, right: 40 },
+        head: [['Payment Date', 'Plot', 'Customer', 'Amount', 'Mode']],
+        body: payments.length > 0
+          ? payments.map((payment) => [
+            displayDate(payment.paymentDate),
+            `#${payment.plotNumber}`,
+            `${payment.customerName || '-'}\n${payment.phoneNumber || '-'}`,
+            formatPdfCurrency(Number(payment.paidAmount || 0)),
+            payment.paymentMode || 'CASH',
+          ])
+          : [['No collections found for this date range.', '', '', '', '']],
+        foot: [['Total Collection', '', '', formatPdfCurrency(total), '']],
+        columnStyles: {
+          0: { cellWidth: 86 },
+          1: { cellWidth: 54, fontStyle: 'bold' },
+          2: { cellWidth: 190 },
+          3: { halign: 'right', cellWidth: 130, fontStyle: 'bold' },
+          4: { cellWidth: 55 },
+        },
+        didParseCell: (data) => {
+          if (payments.length === 0 && data.section === 'body' && data.column.index === 0) {
+            data.cell.colSpan = 5;
+            data.cell.styles.halign = 'center';
+            data.cell.styles.fontStyle = 'bold';
+          }
+          if (payments.length === 0 && data.section === 'body' && data.column.index > 0) {
+            data.cell.text = [];
+          }
+          if (data.section === 'foot' && data.column.index === 0) {
+            data.cell.colSpan = 3;
+            data.cell.styles.halign = 'right';
+          }
+          if (data.section === 'foot' && (data.column.index === 1 || data.column.index === 2)) {
+            data.cell.text = [];
+          }
+        },
+      });
+
+      addPdfFooter(doc);
+      doc.save(`Collection_${projectData.identity.village}_${collectionDates.from}.pdf`);
+    } catch (error) {
+      failPdfDownload('Collection Statement', error);
+    }
   };
 
   return (
@@ -410,7 +554,7 @@ const [showReportPreview, setShowReportPreview] = useState(false);
                  gTotalPend += pending;
 
                  return (
-  <tr key={plot.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+  <tr key={plot.id} className="pdf-row" style={{ borderBottom: '1px solid #e5e7eb', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
      <td style={{ padding: '8px', fontWeight: 'bold' }}>{plot.plotNumber}</td>
      <td style={{ padding: '8px' }}>
         <div style={{ fontWeight: 'bold' }}>{plot.customerName}</div>
@@ -465,7 +609,7 @@ const [showReportPreview, setShowReportPreview] = useState(false);
                    {/* TABLE */}
                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px' }}>
                       <thead>
-                         <tr style={{ backgroundColor: '#1f2937', color: '#fff' }}>
+                         <tr className="pdf-row" style={{ backgroundColor: '#1f2937', color: '#fff', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                             <th style={{ padding: '10px', textAlign: 'left' }}>Plot</th>
                             <th style={{ padding: '10px', textAlign: 'left' }}>Customer</th>
                             <th style={{ padding: '10px', textAlign: 'right' }}>Gross Value</th>
@@ -477,7 +621,7 @@ const [showReportPreview, setShowReportPreview] = useState(false);
                       </thead>
                       <tbody>
                          {rows}
-                         <tr style={{ backgroundColor: '#f3f4f6', fontWeight: 'bold', borderTop: '2px solid #000' }}>
+                         <tr className="pdf-row" style={{ backgroundColor: '#f3f4f6', fontWeight: 'bold', borderTop: '2px solid #000', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                             <td colSpan={2} style={{ padding: '12px', textAlign: 'center' }}>GRAND TOTALS (Sold Plots)</td>
                             <td style={{ padding: '12px', textAlign: 'right' }}>{formatCurrency(gTotalGross)}</td>
                             <td style={{ padding: '12px', textAlign: 'right', color: '#ef4444' }}>{formatCurrency(gTotalComm)}</td>
@@ -794,20 +938,8 @@ const [showReportPreview, setShowReportPreview] = useState(false);
             </div>
 
             <div className="p-4 bg-slate-50 border-t border-slate-200">
-              <button 
-                onClick={() => {
-                  const element = document.getElementById('collection-pdf-template');
-                  if (!element) return;
-                  element.style.display = 'block';
-                  const opt = { 
-                    margin: 0.5, 
-                    filename: `Collection_${projectData.identity.village}_${collectionDates.from}.pdf`, 
-                    image: { type: 'jpeg', quality: 0.98 }, 
-                    html2canvas: { scale: 2 }, 
-                    jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' } 
-                  };
-                  html2pdf().set(opt).from(element).save().then(() => { element.style.display = 'none'; });
-                }}
+              <button
+                onClick={handleGenerateCollectionStatement}
                 className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold text-sm shadow-xl hover:bg-black transition-all flex items-center justify-center gap-2"
               >
                 <Download size={18} /> Download Statement (PDF)
@@ -825,46 +957,42 @@ const [showReportPreview, setShowReportPreview] = useState(false);
                 Project: {projectData.identity.village} | Dates: {displayDate(collectionDates.from)} to {displayDate(collectionDates.to)}
               </p>
           </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-              <thead>
-                <tr style={{ backgroundColor: '#f9fafb' }}>
-                  <th style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'left' }}>Date</th>
-                  <th style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'left' }}>Plot</th>
-                  <th style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'left' }}>Customer</th>
-                  <th style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'right' }}>Amount</th>
-                  <th style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'left' }}>Mode</th>
-                </tr>
-              </thead>
-              <tbody>
-                  {(() => {
-                      const pays: any[] = [];
-                      plots.forEach((pl: any) => (pl.dealStructure?.schedule || []).forEach((ins: any) => { 
-                        if (ins.isPaid && ins.paymentDate >= collectionDates.from && ins.paymentDate <= collectionDates.to) {
-                          pays.push({ ...ins, plot: pl.plotNumber, name: pl.customerName }); 
-                        }
-                      }));
-                      const total = pays.reduce((s, p) => s + Number(p.paidAmount), 0);
-                      return (
-                        <>
-                          {pays.sort((a,b) => a.paymentDate.localeCompare(b.paymentDate)).map((p, i) => (
-                            <tr key={i}>
-                                <td style={{ border: '1px solid #e5e7eb', padding: '10px' }}>{displayDate(p.paymentDate)}</td>
-                                <td style={{ border: '1px solid #e5e7eb', padding: '10px', fontWeight: 'bold' }}>#{p.plot}</td>
-                                <td style={{ border: '1px solid #e5e7eb', padding: '10px' }}>{p.name}</td>
-                                <td style={{ border: '1px solid #e5e7eb', padding: '10px', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(p.paidAmount)}</td>
-                                <td style={{ border: '1px solid #e5e7eb', padding: '10px' }}>{p.paymentMode || 'CASH'}</td>
-                            </tr>
-                          ))}
-                          <tr style={{ backgroundColor: '#f0fdf4' }}>
-                            <td colSpan={3} style={{ border: '1px solid #e5e7eb', padding: '15px', textAlign: 'right', fontWeight: 'bold' }}>TOTAL COLLECTION:</td>
-                            <td style={{ border: '1px solid #e5e7eb', padding: '15px', textAlign: 'right', fontWeight: 'bold', color: '#059669', fontSize: '14px' }}>{formatCurrency(total)}</td>
-                            <td style={{ border: '1px solid #e5e7eb' }}></td>
-                          </tr>
-                        </>
-                      );
-                  })()}
-              </tbody>
-          </table>
+          <div style={{ border: '1px solid #e5e7eb', borderBottom: 'none', fontSize: '11px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 2fr 1.2fr 0.8fr', backgroundColor: '#f9fafb', fontWeight: 700 }}>
+              <div style={{ borderBottom: '1px solid #e5e7eb', padding: '10px' }}>Date</div>
+              <div style={{ borderBottom: '1px solid #e5e7eb', padding: '10px' }}>Plot</div>
+              <div style={{ borderBottom: '1px solid #e5e7eb', padding: '10px' }}>Customer</div>
+              <div style={{ borderBottom: '1px solid #e5e7eb', padding: '10px', textAlign: 'right' }}>Amount</div>
+              <div style={{ borderBottom: '1px solid #e5e7eb', padding: '10px' }}>Mode</div>
+            </div>
+            {(() => {
+              const pays: any[] = [];
+              plots.forEach((pl: any) => (pl.dealStructure?.schedule || []).forEach((ins: any) => {
+                if (ins.isPaid && ins.paymentDate >= collectionDates.from && ins.paymentDate <= collectionDates.to) {
+                  pays.push({ ...ins, plot: pl.plotNumber, name: pl.customerName });
+                }
+              }));
+              const total = pays.reduce((s, p) => s + Number(p.paidAmount), 0);
+              return (
+                <>
+                  {pays.sort((a, b) => a.paymentDate.localeCompare(b.paymentDate)).map((p, i) => (
+                    <div key={i} className="pdf-row pdf-card" style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 2fr 1.2fr 0.8fr', borderBottom: '1px solid #e5e7eb', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
+                      <div style={{ padding: '10px' }}>{displayDate(p.paymentDate)}</div>
+                      <div style={{ padding: '10px', fontWeight: 'bold' }}>#{p.plot}</div>
+                      <div style={{ padding: '10px' }}>{p.name}</div>
+                      <div style={{ padding: '10px', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(p.paidAmount)}</div>
+                      <div style={{ padding: '10px' }}>{p.paymentMode || 'CASH'}</div>
+                    </div>
+                  ))}
+                  <div className="pdf-row pdf-card" style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 2fr 1.2fr 0.8fr', backgroundColor: '#f0fdf4', borderBottom: '1px solid #e5e7eb', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
+                    <div style={{ gridColumn: '1 / span 3', padding: '15px', textAlign: 'right', fontWeight: 'bold' }}>TOTAL COLLECTION:</div>
+                    <div style={{ padding: '15px', textAlign: 'right', fontWeight: 'bold', color: '#059669', fontSize: '14px' }}>{formatCurrency(total)}</div>
+                    <div style={{ padding: '15px' }}></div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
       </div>
 
     </div>
@@ -1130,26 +1258,133 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
         setIsSaving(false);
     };
 
-    const handleExportPDF = () => {
-        const element = document.getElementById(`pdf-template-${plotId}`);
-        if (!element) return;
-        element.style.display = 'block';
-        
+    const handleExportPDF = async () => {
         const customerName = plotData.customerName ? plotData.customerName.replace(/\s+/g, '_') : 'Customer';
         const plotNum = plotData.plotNumber || 'Plot';
+        const filename = `Deal_${plotNum}_${customerName}.pdf`;
+        const doc = await createPdfDoc('portrait');
+        if (!doc) {
+          failPdfDownload('Plot Deal', new Error('Unable to create PDF document.'));
+          return;
+        }
 
-        const opt = {
-          margin: [0.3, 0.3, 0.3, 0.3],
-          filename: `Deal_${plotNum}_${customerName}.pdf`,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-          jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
-          pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+        try {
+        addPdfHeader(doc, 'PLOT SALE AGREEMENT', `Agreement Ref: ${new Date().getFullYear()}-${plotNum} | Project: ${projectIdentity.village || 'Project'}`);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(55, 65, 81);
+        doc.text(`Generated: ${displayDate(new Date().toISOString())}`, 430, 42);
+
+        const drawBox = (x: number, y: number, w: number, h: number, title: string, lines: string[]) => {
+          doc.setDrawColor(55, 65, 81);
+          doc.setLineWidth(0.75);
+          doc.setFillColor(248, 250, 252);
+          doc.roundedRect(x, y, w, h, 4, 4, 'FD');
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(8.5);
+          doc.setTextColor(31, 41, 55);
+          doc.text(title.toUpperCase(), x + 12, y + 18);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(9.2);
+          doc.setTextColor(17, 24, 39);
+          lines.forEach((line, idx) => doc.text(line, x + 12, y + 36 + idx * 14));
         };
 
-        html2pdf().set(opt).from(element).save().then(() => {
-           element.style.display = 'none'; 
+        const dealEnd = (() => {
+          if (!deal.startDate || !deal.totalDurationVal) return '-';
+          const endDate = new Date(deal.startDate + 'T12:00:00');
+          const duration = parseInt(deal.totalDurationVal) || 0;
+          if (deal.totalDurationUnit === 'Days') endDate.setDate(endDate.getDate() + duration);
+          else endDate.setMonth(endDate.getMonth() + duration);
+          return displayDate(endDate.toISOString().split('T')[0]);
+        })();
+
+        drawBox(40, 78, 245, 96, 'Buyer Details', [
+          plotData.customerName || 'N/A',
+          `Phone: ${plotData.phoneNumber || '-'}`,
+          `Agreement Date: ${displayDate(deal.startDate || plotData.bookingDate)}`,
+          `Deal End: ${dealEnd}`,
+        ]);
+        drawBox(310, 78, 245, 96, 'Property Details', [
+          `Plot Number: #${plotData.plotNumber}`,
+          `Area: ${formatInputNumber(plotData.areaVaar)} Vaar`,
+          `Rate: ${formatPdfCurrency(Number(plotData.customLandRate))} / vaar`,
+          `Dimensions: ${plotData.dimLengthFt} x ${plotData.dimWidthFt} ft`,
+        ]);
+
+        autoTable(doc, {
+          startY: 198,
+          margin: { left: 40, right: 40 },
+          head: [['Gross Deal', 'Commission', 'Net Deal', 'Paid', 'Balance']],
+          body: [[
+            formatPdfCurrency(totalValue),
+            `- ${formatPdfCurrency(commissionAmount)}`,
+            formatPdfCurrency(netTotalValue),
+            formatPdfCurrency(totalPaid),
+            formatPdfCurrency(balanceDue),
+          ]],
+          columnStyles: {
+            0: { halign: 'right', cellWidth: 103, fontStyle: 'bold' },
+            1: { halign: 'right', cellWidth: 103, fontStyle: 'bold' },
+            2: { halign: 'right', cellWidth: 103, fontStyle: 'bold' },
+            3: { halign: 'right', cellWidth: 103, fontStyle: 'bold' },
+            4: { halign: 'right', cellWidth: 103, fontStyle: 'bold' },
+          },
         });
+
+        const scheduleStartY = getPdfNextY(doc, 250) + 6;
+        let runningBalance = netTotalValue;
+        const scheduleRows = deal.schedule.map((item) => {
+          if (item.isPaid) runningBalance -= Number(item.paidAmount);
+          return [
+            item.label,
+            displayDate(item.dueDate),
+            formatPdfCurrency(item.expectedAmount),
+            item.isPaid ? formatPdfCurrency(Number(item.paidAmount)) : '-',
+            item.isPaid ? formatPdfCurrency(runningBalance) : '-',
+            item.isPaid ? [item.paymentMode || 'CASH', item.paymentMode === 'BANK' ? `${item.bankName || ''} #${item.refNumber || ''}` : '', item.remarks || ''].filter(Boolean).join('\n') : 'Pending',
+          ];
+        });
+
+        autoTable(doc, {
+          startY: scheduleStartY,
+          margin: { left: 40, right: 40 },
+          head: [['Description', 'Due Date', 'Due Amount', 'Paid Amount', 'Balance', 'Ref / Remarks']],
+          body: scheduleRows,
+          foot: [['Total', '', formatPdfCurrency(netTotalValue), formatPdfCurrency(totalPaid), formatPdfCurrency(balanceDue), '']],
+          showFoot: 'lastPage',
+          columnStyles: {
+            0: { cellWidth: 82 },
+            1: { cellWidth: 62 },
+            2: { halign: 'right', cellWidth: 104, fontStyle: 'bold', fontSize: 8.1 },
+            3: { halign: 'right', cellWidth: 104, fontStyle: 'bold', fontSize: 8.1 },
+            4: { halign: 'right', cellWidth: 104, fontStyle: 'bold', fontSize: 8.1 },
+            5: { cellWidth: 59, fontSize: 8 },
+          },
+        });
+
+        const pageHeight = doc.internal.pageSize.getHeight();
+        let y = ((doc as any).lastAutoTable?.finalY || 650) + 70;
+        if (y > pageHeight - 90) {
+          doc.addPage();
+          y = 120;
+        }
+        doc.setDrawColor(17, 24, 39);
+        doc.line(70, y, 250, y);
+        doc.line(345, y, 525, y);
+        doc.setFontSize(9);
+        doc.setTextColor(17, 24, 39);
+        doc.text('Customer Signature', 110, y + 16);
+        doc.text('Authorized Signatory', 385, y + 16);
+        doc.setFontSize(8);
+        doc.setTextColor(107, 114, 128);
+        doc.text(`For ${projectIdentity.village || 'Company'}`, 398, y + 30);
+
+        addPdfFooter(doc);
+        doc.save(filename);
+        } catch (error) {
+          failPdfDownload('Plot Deal', error);
+        }
     };
 
     // Calculate Totals for Footer
@@ -1428,13 +1663,13 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
                             <div>
                                 <div style={{ padding: '8px 0', borderBottom: '2px solid #e5e7eb', marginBottom: '10px', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', color: '#374151' }}>Payment Schedule</div>
                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-                                    <thead><tr style={{ backgroundColor: '#374151', color: '#ffffff' }}><th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', borderRadius: '4px 0 0 4px' }}>Description</th><th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500' }}>Due Date</th><th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Due Amount</th><th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Paid Amount</th><th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Balance</th><th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', width: '20%', borderRadius: '0 4px 4px 0' }}>Ref / Remarks</th></tr></thead>
+                                    <thead><tr className="pdf-row" style={{ backgroundColor: '#374151', color: '#ffffff', pageBreakInside: 'avoid', breakInside: 'avoid' }}><th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', borderRadius: '4px 0 0 4px' }}>Description</th><th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500' }}>Due Date</th><th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Due Amount</th><th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Paid Amount</th><th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500' }}>Balance</th><th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: '500', width: '20%', borderRadius: '0 4px 4px 0' }}>Ref / Remarks</th></tr></thead>
                                     <tbody>
                                         {(() => {
                                             let pdfRunningBalance = netTotalValue;
                                             return deal.schedule.map((item, idx) => {
                                                 if (item.isPaid) pdfRunningBalance -= Number(item.paidAmount);
-                                                return (<tr key={item.id} style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f9fafb' }}>
+                                                return (<tr key={item.id} className="pdf-row" style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f9fafb', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                                                     <td style={{ padding: '10px 12px', color: '#111827' }}>{item.label}</td>
                                                     <td style={{ padding: '10px 12px', color: '#4b5563' }}><div>{displayDate(item.dueDate)}</div>{item.isPaid && item.paymentDate && (<div style={{ fontSize: '9px', color: '#059669', fontWeight: 'bold', marginTop: '2px' }}>Pd: {displayDate(item.paymentDate)}</div>)}</td>
                                                     <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#111827' }}>{formatCurrency(item.expectedAmount)}</td>
@@ -1445,10 +1680,10 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
                                             });
                                         })()}
                                     </tbody>
-                                    <tfoot><tr style={{ borderTop: '2px solid #374151' }}><td colSpan={2} style={{ padding: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Total</td><td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(netTotalValue)}</td><td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold', color: '#059669' }}>{formatCurrency(totalPaid)}</td><td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{formatCurrency(balanceDue)}</td><td></td></tr></tfoot>
+                                    <tfoot><tr className="pdf-row" style={{ borderTop: '2px solid #374151', pageBreakInside: 'avoid', breakInside: 'avoid' }}><td colSpan={2} style={{ padding: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Total</td><td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold' }}>{formatCurrency(netTotalValue)}</td><td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold', color: '#059669' }}>{formatCurrency(totalPaid)}</td><td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>{formatCurrency(balanceDue)}</td><td></td></tr></tfoot>
                                 </table>
                             </div>
-                            <div style={{ marginTop: '60px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', pageBreakInside: 'avoid' }}><div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #111827', width: '180px', margin: '0 auto 8px' }}></div><div style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' }}>Customer Signature</div></div><div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #111827', width: '180px', margin: '0 auto 8px' }}></div><div style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' }}>Authorized Signatory</div><div style={{ fontSize: '9px', color: '#6b7280' }}>For {projectIdentity.village || 'Company'}</div></div></div>
+                            <div className="pdf-card" style={{ marginTop: '60px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', pageBreakInside: 'avoid', breakInside: 'avoid' }}><div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #111827', width: '180px', margin: '0 auto 8px' }}></div><div style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' }}>Customer Signature</div></div><div style={{ textAlign: 'center' }}><div style={{ borderTop: '1px solid #111827', width: '180px', margin: '0 auto 8px' }}></div><div style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' }}>Authorized Signatory</div><div style={{ fontSize: '9px', color: '#6b7280' }}>For {projectIdentity.village || 'Company'}</div></div></div>
                         </div>
                     </div>
                 </div>
