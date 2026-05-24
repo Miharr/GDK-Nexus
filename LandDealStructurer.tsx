@@ -40,7 +40,7 @@ import {
   formatInputNumber,
   parseInputNumber
 } from '../utils/formatters';
-import { addPdfFooter, addPdfHeader, autoTable, createPdfDoc, downloadHtmlPdf, pdfTableDefaults } from '../utils/pdf';
+import { addPdfFooter, addPdfHeader, autoTable, createPdfDoc, pdfTableDefaults } from '../utils/pdf';
 import { supabase } from '../supabaseClient';
 
 const CONVERSION_RATES = {
@@ -407,11 +407,10 @@ const handleClear = () => {
     const villageName = identity.village ? identity.village.replace(/\s+/g, '_') : 'Village';
     const fpNumber = identity.fpNumber ? identity.fpNumber.replace(/\s+/g, '') : 'FP';
     const filename = `GDK_NEXUS_${villageName}_FP${fpNumber}.pdf`;
-    const fallback = () => downloadHtmlPdf('pdf-template', filename, 'portrait', [0.3, 0.3, 0.3, 0.3]);
-
     const doc = await createPdfDoc('portrait');
     if (!doc) {
-      await fallback();
+      console.error('PDF generation failed: jsPDF runtime unavailable (Land Cost Sheet).');
+      alert('PDF generation failed. Please refresh and try again.');
       return;
     }
 
@@ -498,8 +497,8 @@ const handleClear = () => {
     addPdfFooter(doc);
     doc.save(filename);
     } catch (error) {
-      console.error(error);
-      await fallback();
+      console.error('PDF generation failed (Land Cost Sheet):', error);
+      alert('PDF generation failed. Please check data and try again.');
     }
  };
 
@@ -508,11 +507,10 @@ const handleClear = () => {
     const fromDate = new Date(ledgerRange.from).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
     const toDate = new Date(ledgerRange.to).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
     const filename = `LEDGER_${villageName}_${fromDate}_to_${toDate}.pdf`;
-    const fallback = () => downloadHtmlPdf('ledger-pdf-template', filename, 'portrait', [0.5, 0.5, 0.5, 0.5]);
-
     const doc = await createPdfDoc('portrait');
     if (!doc) {
-      await fallback();
+      console.error('PDF generation failed: jsPDF runtime unavailable (Ledger Statement).');
+      alert('PDF generation failed. Please refresh and try again.');
       return;
     }
 
@@ -543,8 +541,8 @@ const handleClear = () => {
     addPdfFooter(doc);
     doc.save(filename);
     } catch (error) {
-      console.error(error);
-      await fallback();
+      console.error('PDF generation failed (Ledger Statement):', error);
+      alert('PDF generation failed. Please check data and try again.');
     }
   };
 

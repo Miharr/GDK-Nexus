@@ -121,27 +121,30 @@ export const pdfTableDefaults = {
   theme: 'grid',
   showHead: 'everyPage',
   rowPageBreak: 'avoid',
+  tableLineWidth: 1,
+  tableLineColor: [17, 24, 39],
   styles: {
-    fontSize: 8,
-    cellPadding: 5,
+    fontSize: 9,
+    cellPadding: 6,
     overflow: 'linebreak',
     valign: 'middle',
-    lineColor: [229, 231, 235],
-    lineWidth: 0.6,
-    textColor: [31, 41, 55],
+    lineColor: [55, 65, 81],
+    lineWidth: 0.9,
+    textColor: [17, 24, 39],
+    fontStyle: 'normal',
   },
   headStyles: {
-    fillColor: [31, 41, 55],
+    fillColor: [17, 24, 39],
     textColor: [255, 255, 255],
-    lineColor: [31, 41, 55],
-    lineWidth: 0.6,
+    lineColor: [17, 24, 39],
+    lineWidth: 1.1,
     fontStyle: 'bold',
   },
   footStyles: {
-    fillColor: [243, 244, 246],
+    fillColor: [229, 231, 235],
     textColor: [17, 24, 39],
-    lineColor: [156, 163, 175],
-    lineWidth: 0.8,
+    lineColor: [31, 41, 55],
+    lineWidth: 1,
     fontStyle: 'bold',
   },
 } as const;
@@ -153,9 +156,9 @@ export const addPdfHeader = (doc: any, title: string, subtitle?: string) => {
   doc.text(title, 40, 42);
 
   if (subtitle) {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(75, 85, 99);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(31, 41, 55);
     doc.text(subtitle, 40, 58);
   }
 };

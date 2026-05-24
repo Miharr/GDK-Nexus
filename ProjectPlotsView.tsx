@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { ProjectSavedState } from '../types';
 import { formatCurrency, formatInputNumber, parseInputNumber } from '../utils/formatters';
-import { addPdfFooter, addPdfHeader, autoTable, createPdfDoc, downloadHtmlPdf, pdfTableDefaults } from '../utils/pdf';
+import { addPdfFooter, addPdfHeader, autoTable, createPdfDoc, pdfTableDefaults } from '../utils/pdf';
 import { supabase } from '../supabaseClient';
 
 const CONVERSION_RATES: any = {
@@ -175,16 +175,10 @@ const [showReportPreview, setShowReportPreview] = useState(false);
   };
 
   const handleGenerateProjectReport = async () => {
-    const fallback = () => downloadHtmlPdf(
-      'project-report-template',
-      `Project_Report_${projectData.identity.village}.pdf`,
-      'landscape',
-      [0.3, 0.3, 0.3, 0.3]
-    );
-
     const doc = await createPdfDoc('landscape');
     if (!doc) {
-      await fallback();
+      console.error('PDF generation failed: jsPDF runtime unavailable (Project Report).');
+      alert('PDF generation failed. Please refresh and try again.');
       return;
     }
 
@@ -266,8 +260,8 @@ const [showReportPreview, setShowReportPreview] = useState(false);
     addPdfFooter(doc);
     doc.save(`Project_Report_${projectData.identity.village}.pdf`);
     } catch (error) {
-      console.error(error);
-      await fallback();
+      console.error('PDF generation failed (Project Report):', error);
+      alert('PDF generation failed. Please check data and try again.');
     }
   };
 
@@ -1336,11 +1330,10 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
         const customerName = plotData.customerName ? plotData.customerName.replace(/\s+/g, '_') : 'Customer';
         const plotNum = plotData.plotNumber || 'Plot';
         const filename = `Deal_${plotNum}_${customerName}.pdf`;
-        const fallback = () => downloadHtmlPdf(`pdf-template-${plotId}`, filename, 'portrait', [0.3, 0.3, 0.3, 0.3]);
-
         const doc = await createPdfDoc('portrait');
         if (!doc) {
-          await fallback();
+          console.error('PDF generation failed: jsPDF runtime unavailable (Plot Deal).');
+          alert('PDF generation failed. Please refresh and try again.');
           return;
         }
 
@@ -1459,8 +1452,8 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
         addPdfFooter(doc);
         doc.save(filename);
         } catch (error) {
-          console.error(error);
-          await fallback();
+          console.error('PDF generation failed (Plot Deal):', error);
+          alert('PDF generation failed. Please check data and try again.');
         }
     };
 
