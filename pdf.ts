@@ -1,19 +1,73 @@
 type PdfOrientation = 'portrait' | 'landscape';
 
-export const createPdfDoc = (orientation: PdfOrientation = 'portrait') => {
-  const JsPDF = (window as any).jspdf?.jsPDF;
-  if (!JsPDF) {
-    alert('PDF engine is still loading. Please try again in a moment.');
-    return null;
+const loadedScripts = new Map<string, Promise<void>>();
+
+const loadScript = (src: string) => {
+  if (typeof window === 'undefined') return Promise.resolve();
+  if (document.querySelector(`script[src="${src}"]`)) return Promise.resolve();
+  if (loadedScripts.has(src)) return loadedScripts.get(src)!;
+
+  const promise = new Promise<void>((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => {
+      loadedScripts.delete(src);
+      reject(new Error(`Failed to load ${src}`));
+    };
+    document.head.appendChild(script);
+  });
+
+  loadedScripts.set(src, promise);
+  return promise;
+};
+
+const ensurePdfRuntime = async () => {
+  const win = window as any;
+  if (!win.jspdf?.jsPDF) {
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
   }
 
-  const doc = new JsPDF({ orientation, unit: 'pt', format: 'a4' });
-  if (typeof (doc as any).autoTable !== 'function') {
-    alert('PDF table engine is still loading. Please try again in a moment.');
-    return null;
+  if (!win.jspdf?.jsPDF) {
+    throw new Error('PDF engine failed to load.');
   }
 
-  return doc;
+  const probe = new win.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
+  if (typeof probe.autoTable !== 'function' && !win.jspdfAutoTable?.default && !win.jspdfAutoTable && !win.autoTable) {
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js');
+  }
+
+  const testDoc = new win.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
+  if (typeof testDoc.autoTable !== 'function' && !win.jspdfAutoTable?.default && !win.jspdfAutoTable && !win.autoTable) {
+    throw new Error('PDF table engine failed to load.');
+  }
+};
+
+export const createPdfDoc = async (orientation: PdfOrientation = 'portrait') => {
+  try {
+    await ensurePdfRuntime();
+    const JsPDF = (window as any).jspdf.jsPDF;
+    return new JsPDF({ orientation, unit: 'pt', format: 'a4' });
+  } catch (error) {
+    console.error(error);
+    alert('PDF download engine could not load. Please refresh and try again.');
+    return null;
+  }
+};
+
+export const autoTable = (doc: any, options: Record<string, unknown>) => {
+  const win = window as any;
+  if (typeof doc.autoTable === 'function') {
+    doc.autoTable(options);
+    return;
+  }
+
+  const tableFn = win.jspdfAutoTable?.default || win.jspdfAutoTable || win.autoTable;
+  if (typeof tableFn !== 'function') {
+    throw new Error('PDF table engine is unavailable.');
+  }
+  tableFn(doc, options);
 };
 
 export const pdfTableDefaults = {
@@ -68,3 +122,7 @@ export const addPdfFooter = (doc: any) => {
     doc.text(`Page ${page} of ${pageCount}`, doc.internal.pageSize.getWidth() - 84, doc.internal.pageSize.getHeight() - 24);
   }
 };
+
+if (typeof window !== 'undefined') {
+  void ensurePdfRuntime().catch(() => undefined);
+}

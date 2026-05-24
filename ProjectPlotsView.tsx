@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { ProjectSavedState } from '../types';
 import { formatCurrency, formatInputNumber, parseInputNumber } from '../utils/formatters';
-import { addPdfFooter, addPdfHeader, createPdfDoc, pdfTableDefaults } from '../utils/pdf';
+import { addPdfFooter, addPdfHeader, autoTable, createPdfDoc, pdfTableDefaults } from '../utils/pdf';
 import { supabase } from '../supabaseClient';
 
 const CONVERSION_RATES: any = {
@@ -174,8 +174,8 @@ const [showReportPreview, setShowReportPreview] = useState(false);
     }
   };
 
-  const handleGenerateProjectReport = () => {
-    const doc = createPdfDoc('landscape');
+  const handleGenerateProjectReport = async () => {
+    const doc = await createPdfDoc('landscape');
     if (!doc) return;
 
     const m = projectData.measurements;
@@ -233,7 +233,7 @@ const [showReportPreview, setShowReportPreview] = useState(false);
     });
 
     addPdfHeader(doc, `PROJECT SALES REPORT: ${projectData.identity.village}`, `Estimated sale: ${formatCurrency(projectEstSale)} | Sold gross: ${formatCurrency(gTotalGross)} | Unsold value: ${formatCurrency(projectEstSale - gTotalGross)}`);
-    (doc as any).autoTable({
+    autoTable(doc, {
       ...pdfTableDefaults,
       startY: 78,
       margin: { left: 28, right: 28 },
@@ -256,8 +256,8 @@ const [showReportPreview, setShowReportPreview] = useState(false);
     doc.save(`Project_Report_${projectData.identity.village}.pdf`);
   };
 
-  const handleGenerateCollectionStatement = () => {
-    const doc = createPdfDoc('portrait');
+  const handleGenerateCollectionStatement = async () => {
+    const doc = await createPdfDoc('portrait');
     if (!doc) return;
 
     const payments: any[] = [];
@@ -283,7 +283,7 @@ const [showReportPreview, setShowReportPreview] = useState(false);
       `Project: ${projectData.identity.village} | Dates: ${displayDate(collectionDates.from)} to ${displayDate(collectionDates.to)}`
     );
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       ...pdfTableDefaults,
       startY: 78,
       margin: { left: 40, right: 40 },
@@ -1228,8 +1228,8 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
         setIsSaving(false);
     };
 
-    const handleExportPDF = () => {
-        const doc = createPdfDoc('portrait');
+    const handleExportPDF = async () => {
+        const doc = await createPdfDoc('portrait');
         if (!doc) return;
 
         const customerName = plotData.customerName ? plotData.customerName.replace(/\s+/g, '_') : 'Customer';
@@ -1276,7 +1276,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
           `Dimensions: ${plotData.dimLengthFt} x ${plotData.dimWidthFt} ft`,
         ]);
 
-        (doc as any).autoTable({
+        autoTable(doc, {
           ...pdfTableDefaults,
           startY: 198,
           margin: { left: 40, right: 40 },
@@ -1311,7 +1311,7 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
           ];
         });
 
-        (doc as any).autoTable({
+        autoTable(doc, {
           ...pdfTableDefaults,
           startY: scheduleStartY,
           margin: { left: 40, right: 40 },

@@ -40,7 +40,7 @@ import {
   formatInputNumber,
   parseInputNumber
 } from '../utils/formatters';
-import { addPdfFooter, addPdfHeader, createPdfDoc, pdfTableDefaults } from '../utils/pdf';
+import { addPdfFooter, addPdfHeader, autoTable, createPdfDoc, pdfTableDefaults } from '../utils/pdf';
 import { supabase } from '../supabaseClient';
 
 const CONVERSION_RATES = {
@@ -402,9 +402,9 @@ const handleClear = () => {
     }
   };
 
- const handleDownloadPDF = () => {
+ const handleDownloadPDF = async () => {
     if (!result) return;
-    const doc = createPdfDoc('portrait');
+    const doc = await createPdfDoc('portrait');
     if (!doc) return;
     
     const villageName = identity.village ? identity.village.replace(/\s+/g, '_') : 'Village';
@@ -421,7 +421,7 @@ const handleClear = () => {
 
     addPdfHeader(doc, 'GDK NEXUS LAND COST SHEET', `Project: ${identity.village || 'Unnamed Project'} | TP: ${identity.tpScheme || '-'} | FP: ${identity.fpNumber || '-'}`);
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       ...pdfTableDefaults,
       startY: 78,
       margin: { left: 40, right: 40 },
@@ -435,7 +435,7 @@ const handleClear = () => {
       columnStyles: { 0: { fontStyle: 'bold', cellWidth: 170 } },
     });
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       ...pdfTableDefaults,
       startY: ((doc as any).lastAutoTable?.finalY || 130) + 18,
       margin: { left: 40, right: 40 },
@@ -461,7 +461,7 @@ const handleClear = () => {
       ...(overheads.customExpenses || []).map((item: any) => [item.name || 'Extra Expense', formatCurrency(getNum(item.amount))]),
     ].filter((row) => row[1] !== formatCurrency(0));
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       ...pdfTableDefaults,
       startY: ((doc as any).lastAutoTable?.finalY || 250) + 18,
       margin: { left: 40, right: 40 },
@@ -472,7 +472,7 @@ const handleClear = () => {
       columnStyles: { 0: { cellWidth: 330 }, 1: { halign: 'right' } },
     });
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       ...pdfTableDefaults,
       startY: ((doc as any).lastAutoTable?.finalY || 380) + 18,
       margin: { left: 40, right: 40 },
@@ -492,8 +492,8 @@ const handleClear = () => {
     doc.save(`GDK_NEXUS_${villageName}_FP${fpNumber}.pdf`);
  };
 
-  const handleDownloadLedgerPDF = () => {
-    const doc = createPdfDoc('portrait');
+  const handleDownloadLedgerPDF = async () => {
+    const doc = await createPdfDoc('portrait');
     if (!doc) return;
     
     const villageName = identity.village ? identity.village.replace(/\s+/g, '_') : 'Village';
@@ -504,7 +504,7 @@ const handleClear = () => {
 
     addPdfHeader(doc, 'EXPENSE LEDGER STATEMENT', `Project: ${identity.village || 'Unnamed Project'} | Period: ${fromDate} to ${toDate}`);
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       ...pdfTableDefaults,
       startY: 78,
       margin: { left: 40, right: 40 },
