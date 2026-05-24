@@ -6,17 +6,6 @@ const loadScript = (src: string) => {
   if (typeof window === 'undefined') return Promise.resolve();
   if (loadedScripts.has(src)) return loadedScripts.get(src)!;
 
-  const existing = document.querySelector(`script[src="${src}"]`) as HTMLScriptElement | null;
-  if (existing) {
-    if (existing.dataset.loaded === 'true') return Promise.resolve();
-    const promise = new Promise<void>((resolve, reject) => {
-      existing.addEventListener('load', () => resolve(), { once: true });
-      existing.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), { once: true });
-    });
-    loadedScripts.set(src, promise);
-    return promise;
-  }
-
   const promise = new Promise<void>((resolve, reject) => {
     const script = document.createElement('script');
     script.src = src;
@@ -36,7 +25,7 @@ const loadScript = (src: string) => {
   return promise;
 };
 
-const ensurePdfRuntime = async () => {
+const ensurePdfRuntime = async (requireAutoTable = true) => {
   const win = window as any;
   if (!win.jspdf?.jsPDF) {
     await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
@@ -45,6 +34,8 @@ const ensurePdfRuntime = async () => {
   if (!win.jspdf?.jsPDF) {
     throw new Error('PDF engine failed to load.');
   }
+
+  if (!requireAutoTable) return;
 
   const probe = new win.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
   if (typeof probe.autoTable !== 'function' && !win.jspdfAutoTable?.default && !win.jspdfAutoTable && !win.autoTable) {
@@ -57,9 +48,9 @@ const ensurePdfRuntime = async () => {
   }
 };
 
-export const createPdfDoc = async (orientation: PdfOrientation = 'portrait') => {
+export const createPdfDoc = async (orientation: PdfOrientation = 'portrait', requireAutoTable = true) => {
   try {
-    await ensurePdfRuntime();
+    await ensurePdfRuntime(requireAutoTable);
     const JsPDF = (window as any).jspdf.jsPDF;
     return new JsPDF({ orientation, unit: 'pt', format: 'a4' });
   } catch (error) {

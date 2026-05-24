@@ -272,16 +272,9 @@ const [showReportPreview, setShowReportPreview] = useState(false);
   };
 
   const handleGenerateCollectionStatement = async () => {
-    const fallback = () => downloadHtmlPdf(
-      'collection-pdf-template',
-      `Collection_${projectData.identity.village}_${collectionDates.from}.pdf`,
-      'portrait',
-      0.5
-    );
-
-    const doc = await createPdfDoc('portrait');
+    const doc = await createPdfDoc('portrait', false);
     if (!doc) {
-      await fallback();
+      alert('PDF download engine could not load. Please refresh and try again.');
       return;
     }
 
@@ -309,34 +302,115 @@ const [showReportPreview, setShowReportPreview] = useState(false);
       `Project: ${projectData.identity.village} | Dates: ${displayDate(collectionDates.from)} to ${displayDate(collectionDates.to)}`
     );
 
-    autoTable(doc, {
-      ...pdfTableDefaults,
-      startY: 78,
-      margin: { left: 40, right: 40 },
-      head: [['Payment Date', 'Plot', 'Customer', 'Amount', 'Mode']],
-      body: payments.map((payment) => [
-        displayDate(payment.paymentDate),
-        `#${payment.plotNumber}`,
-        `${payment.customerName || '-'}\n${payment.phoneNumber || '-'}`,
-        formatCurrency(Number(payment.paidAmount || 0)),
-        payment.paymentMode || 'CASH',
-      ]),
-      foot: [['Total Collection', '', '', formatCurrency(total), '']],
-      showFoot: 'lastPage',
-      columnStyles: {
-        0: { cellWidth: 86 },
-        1: { cellWidth: 54 },
-        2: { cellWidth: 190 },
-        3: { halign: 'right', cellWidth: 100 },
-        4: { cellWidth: 70 },
-      },
-    });
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const left = 40;
+    const bottom = pageHeight - 54;
+    const headerHeight = 24;
+    const columns = [
+      { title: 'Payment Date', x: left, width: 82, align: 'left' as const },
+      { title: 'Plot', x: left + 82, width: 48, align: 'left' as const },
+      { title: 'Customer', x: left + 130, width: 210, align: 'left' as const },
+      { title: 'Amount', x: left + 340, width: 102, align: 'right' as const },
+      { title: 'Mode', x: left + 442, width: 72, align: 'left' as const },
+    ];
+    const tableWidth = columns.reduce((sum, column) => sum + column.width, 0);
+
+    const drawTableHeader = (startY: number) => {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(255, 255, 255);
+      doc.setFillColor(31, 41, 55);
+      doc.setDrawColor(31, 41, 55);
+      doc.setLineWidth(0.6);
+      doc.rect(left, startY, tableWidth, headerHeight, 'F');
+      columns.forEach((column) => {
+        doc.rect(column.x, startY, column.width, headerHeight, 'S');
+        const textX = column.align === 'right' ? column.x + column.width - 6 : column.x + 6;
+        doc.text(column.title, textX, startY + 15, { align: column.align });
+      });
+      return startY + headerHeight;
+    };
+
+    const addPageWithTableHeader = () => {
+      doc.addPage();
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(17, 24, 39);
+      doc.text('COLLECTION STATEMENT', left, 42);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(75, 85, 99);
+      doc.text(`${projectData.identity.village} | ${displayDate(collectionDates.from)} to ${displayDate(collectionDates.to)}`, left, 56);
+      return drawTableHeader(76);
+    };
+
+    const drawRow = (rowY: number, cells: string[], rowHeight: number, isTotal = false) => {
+      doc.setDrawColor(isTotal ? 156 : 229, isTotal ? 163 : 231, isTotal ? 175 : 235);
+      doc.setLineWidth(isTotal ? 0.8 : 0.6);
+      doc.setFillColor(isTotal ? 243 : 255, isTotal ? 244 : 255, isTotal ? 246 : 255);
+      doc.rect(left, rowY, tableWidth, rowHeight, 'F');
+
+      columns.forEach((column, index) => {
+        doc.rect(column.x, rowY, column.width, rowHeight, 'S');
+        const text = cells[index] || '';
+        const textX = column.align === 'right' ? column.x + column.width - 6 : column.x + 6;
+        doc.setFont('helvetica', isTotal || index === 3 || index === 1 ? 'bold' : 'normal');
+        doc.setFontSize(isTotal ? 9 : 8);
+        doc.setTextColor(isTotal && index === 3 ? 5 : 31, isTotal && index === 3 ? 150 : 41, isTotal && index === 3 ? 105 : 55);
+        const lines = index === 2 && !isTotal ? doc.splitTextToSize(text, column.width - 12) : [text];
+        doc.text(lines, textX, rowY + 13, { align: column.align, maxWidth: column.width - 12 });
+      });
+    };
+
+    let y = drawTableHeader(78);
+
+    if (payments.length === 0) {
+      drawRow(y, ['No collections found for this date range.', '', '', '', ''], 34);
+      y += 34;
+    } else {
+      payments.forEach((payment) => {
+        const customerText = [payment.customerName || '-', payment.phoneNumber || '-'].join('\n');
+        const customerLines = doc.splitTextToSize(customerText, columns[2].width - 12);
+        const rowHeight = Math.max(34, 12 + customerLines.length * 10);
+
+        if (y + rowHeight > bottom) {
+          y = addPageWithTableHeader();
+        }
+
+        drawRow(y, [
+          displayDate(payment.paymentDate),
+          `#${payment.plotNumber}`,
+          customerText,
+          formatCurrency(Number(payment.paidAmount || 0)),
+          payment.paymentMode || 'CASH',
+        ], rowHeight);
+        y += rowHeight;
+      });
+    }
+
+    const totalHeight = 34;
+    if (y + totalHeight > bottom) {
+      y = addPageWithTableHeader();
+    }
+
+    doc.setDrawColor(156, 163, 175);
+    doc.setFillColor(240, 253, 244);
+    doc.rect(left, y, tableWidth, totalHeight, 'F');
+    doc.rect(left, y, columns[0].width + columns[1].width + columns[2].width, totalHeight, 'S');
+    doc.rect(columns[3].x, y, columns[3].width, totalHeight, 'S');
+    doc.rect(columns[4].x, y, columns[4].width, totalHeight, 'S');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(17, 24, 39);
+    doc.text('TOTAL COLLECTION:', columns[2].x + columns[2].width - 8, y + 21, { align: 'right' });
+    doc.setTextColor(5, 150, 105);
+    doc.text(formatCurrency(total), columns[3].x + columns[3].width - 6, y + 21, { align: 'right' });
 
     addPdfFooter(doc);
     doc.save(`Collection_${projectData.identity.village}_${collectionDates.from}.pdf`);
     } catch (error) {
       console.error(error);
-      await fallback();
+      alert('Collection statement PDF failed. Please refresh and try again.');
     }
   };
 
