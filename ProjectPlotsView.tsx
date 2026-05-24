@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   ArrowLeft, 
-  Search, 
+  Hash,
   Calendar,
   LayoutGrid,
   ChevronDown,
@@ -18,6 +18,7 @@ import {
   MessageSquare,
   PlusCircle,
   User,
+  Phone,
   Trash2,
   Download
 } from 'lucide-react';
@@ -118,7 +119,9 @@ const sortScheduleByDate = (schedule: PaymentInstallment[]) => {
 };
 
 export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottingData, projectId }) => {
-  const [searchTerm, setSearchTerm] = useState('');
+  const [plotNumberFilter, setPlotNumberFilter] = useState('');
+  const [customerNameFilter, setCustomerNameFilter] = useState('');
+  const [phoneFilter, setPhoneFilter] = useState('');
   const [expandedPlotId, setExpandedPlotId] = useState<string | null>(null);
   const [localPlottingData, setLocalPlottingData] = useState(plottingData);
 const [showReportPreview, setShowReportPreview] = useState(false);
@@ -132,16 +135,29 @@ const [showReportPreview, setShowReportPreview] = useState(false);
   const landRate = Number(data.landRate) || 0;
   const devRate = Number(data.devRate) || 0;
 
+  const hasActiveFilters = Boolean(plotNumberFilter || customerNameFilter || phoneFilter);
+
+  const clearFilters = () => {
+    setPlotNumberFilter('');
+    setCustomerNameFilter('');
+    setPhoneFilter('');
+  };
+
   // 1. FILTERING: Only show valid plots (Name & Number exist)
   const filteredPlots = plots.filter((plot: any) => {
     if (!plot.customerName || !plot.plotNumber) return false;
 
-    const q = searchTerm.toLowerCase();
-    return (
-      (plot.customerName?.toLowerCase().includes(q) || '') ||
-      (plot.plotNumber?.toString().includes(q) || '') ||
-      (plot.phoneNumber?.includes(q) || '')
-    );
+    const plotNumber = String(plot.plotNumber || '').toLowerCase();
+    const customerName = String(plot.customerName || '').toLowerCase();
+    const phone = String(plot.phoneNumber || '');
+    const phoneDigits = phone.replace(/\D/g, '');
+    const phoneQuery = phoneFilter.replace(/\D/g, '');
+
+    const matchesPlot = !plotNumberFilter || plotNumber.includes(plotNumberFilter.toLowerCase().trim());
+    const matchesName = !customerNameFilter || customerName.includes(customerNameFilter.toLowerCase().trim());
+    const matchesPhone = !phoneFilter || phone.toLowerCase().includes(phoneFilter.toLowerCase().trim()) || (Boolean(phoneQuery) && phoneDigits.includes(phoneQuery));
+
+    return matchesPlot && matchesName && matchesPhone;
   });
 
   const toggleExpand = (id: string) => {
@@ -384,17 +400,55 @@ const [showReportPreview, setShowReportPreview] = useState(false);
       </header>
 
       <main className="max-w-7xl mx-auto px-4 md:px-8 mt-8">
-        <div className="mb-6 relative group max-w-md">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Search size={16} className="text-slate-400 group-focus-within:text-orange-500 transition-colors" />
+        <div className="mb-6 bg-white border border-slate-200 rounded-xl shadow-sm p-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="relative group">
+              <Hash size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-orange-500 transition-colors" />
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="Plot number"
+                value={plotNumberFilter}
+                onChange={(e) => setPlotNumberFilter(e.target.value.trimStart())}
+                className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all"
+              />
             </div>
-            <input 
-                type="text" 
-                placeholder="Search Customer, Plot #..." 
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all shadow-sm"
-            />
+            <div className="relative group">
+              <User size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-orange-500 transition-colors" />
+              <input
+                type="text"
+                placeholder="Customer name"
+                value={customerNameFilter}
+                onChange={(e) => setCustomerNameFilter(e.target.value.trimStart())}
+                className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all"
+              />
+            </div>
+            <div className="relative group">
+              <Phone size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-orange-500 transition-colors" />
+              <input
+                type="tel"
+                inputMode="tel"
+                placeholder="Phone number"
+                value={phoneFilter}
+                onChange={(e) => setPhoneFilter(e.target.value.trimStart())}
+                className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all"
+              />
+            </div>
+          </div>
+          {hasActiveFilters && (
+            <div className="mt-3 flex items-center justify-between gap-3 text-xs">
+              <span className="font-bold text-slate-400 uppercase tracking-wider">
+                {filteredPlots.length} matching result{filteredPlots.length === 1 ? '' : 's'}
+              </span>
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="text-slate-500 hover:text-orange-600 font-bold transition-colors"
+              >
+                Clear filters
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
