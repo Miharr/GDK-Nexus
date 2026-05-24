@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { ProjectSavedState } from '../types';
 import { formatCurrency, formatInputNumber, parseInputNumber } from '../utils/formatters';
-import { addPdfFooter, addPdfHeader, autoTable, createPdfDoc, pdfTableDefaults } from '../utils/pdf';
+import { addPdfFooter, addPdfHeader, autoTable, createPdfDoc, downloadHtmlPdf, pdfTableDefaults } from '../utils/pdf';
 import { supabase } from '../supabaseClient';
 
 const CONVERSION_RATES: any = {
@@ -175,9 +175,20 @@ const [showReportPreview, setShowReportPreview] = useState(false);
   };
 
   const handleGenerateProjectReport = async () => {
-    const doc = await createPdfDoc('landscape');
-    if (!doc) return;
+    const fallback = () => downloadHtmlPdf(
+      'project-report-template',
+      `Project_Report_${projectData.identity.village}.pdf`,
+      'landscape',
+      [0.3, 0.3, 0.3, 0.3]
+    );
 
+    const doc = await createPdfDoc('landscape');
+    if (!doc) {
+      await fallback();
+      return;
+    }
+
+    try {
     const m = projectData.measurements;
     let baseVal = 0;
     let baseUnit = 'Vaar';
@@ -254,12 +265,27 @@ const [showReportPreview, setShowReportPreview] = useState(false);
     });
     addPdfFooter(doc);
     doc.save(`Project_Report_${projectData.identity.village}.pdf`);
+    } catch (error) {
+      console.error(error);
+      await fallback();
+    }
   };
 
   const handleGenerateCollectionStatement = async () => {
-    const doc = await createPdfDoc('portrait');
-    if (!doc) return;
+    const fallback = () => downloadHtmlPdf(
+      'collection-pdf-template',
+      `Collection_${projectData.identity.village}_${collectionDates.from}.pdf`,
+      'portrait',
+      0.5
+    );
 
+    const doc = await createPdfDoc('portrait');
+    if (!doc) {
+      await fallback();
+      return;
+    }
+
+    try {
     const payments: any[] = [];
     plots.forEach((plot: any) => {
       (plot.dealStructure?.schedule || []).forEach((installment: any) => {
@@ -308,6 +334,10 @@ const [showReportPreview, setShowReportPreview] = useState(false);
 
     addPdfFooter(doc);
     doc.save(`Collection_${projectData.identity.village}_${collectionDates.from}.pdf`);
+    } catch (error) {
+      console.error(error);
+      await fallback();
+    }
   };
 
   return (
@@ -1229,12 +1259,18 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
     };
 
     const handleExportPDF = async () => {
-        const doc = await createPdfDoc('portrait');
-        if (!doc) return;
-
         const customerName = plotData.customerName ? plotData.customerName.replace(/\s+/g, '_') : 'Customer';
         const plotNum = plotData.plotNumber || 'Plot';
+        const filename = `Deal_${plotNum}_${customerName}.pdf`;
+        const fallback = () => downloadHtmlPdf(`pdf-template-${plotId}`, filename, 'portrait', [0.3, 0.3, 0.3, 0.3]);
 
+        const doc = await createPdfDoc('portrait');
+        if (!doc) {
+          await fallback();
+          return;
+        }
+
+        try {
         addPdfHeader(doc, 'PLOT SALE AGREEMENT', `Agreement Ref: ${new Date().getFullYear()}-${plotNum} | Project: ${projectIdentity.village || 'Project'}`);
         doc.setFontSize(9);
         doc.setTextColor(75, 85, 99);
@@ -1347,7 +1383,11 @@ const PlotDealManager: React.FC<ManagerProps> = ({ totalValue, landValue, plotId
         doc.text(`For ${projectIdentity.village || 'Company'}`, 398, y + 30);
 
         addPdfFooter(doc);
-        doc.save(`Deal_${plotNum}_${customerName}.pdf`);
+        doc.save(filename);
+        } catch (error) {
+          console.error(error);
+          await fallback();
+        }
     };
 
     // Calculate Totals for Footer

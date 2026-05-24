@@ -4,14 +4,27 @@ const loadedScripts = new Map<string, Promise<void>>();
 
 const loadScript = (src: string) => {
   if (typeof window === 'undefined') return Promise.resolve();
-  if (document.querySelector(`script[src="${src}"]`)) return Promise.resolve();
   if (loadedScripts.has(src)) return loadedScripts.get(src)!;
+
+  const existing = document.querySelector(`script[src="${src}"]`) as HTMLScriptElement | null;
+  if (existing) {
+    if (existing.dataset.loaded === 'true') return Promise.resolve();
+    const promise = new Promise<void>((resolve, reject) => {
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), { once: true });
+    });
+    loadedScripts.set(src, promise);
+    return promise;
+  }
 
   const promise = new Promise<void>((resolve, reject) => {
     const script = document.createElement('script');
     script.src = src;
     script.async = true;
-    script.onload = () => resolve();
+    script.onload = () => {
+      script.dataset.loaded = 'true';
+      resolve();
+    };
     script.onerror = () => {
       loadedScripts.delete(src);
       reject(new Error(`Failed to load ${src}`));
@@ -51,8 +64,51 @@ export const createPdfDoc = async (orientation: PdfOrientation = 'portrait') => 
     return new JsPDF({ orientation, unit: 'pt', format: 'a4' });
   } catch (error) {
     console.error(error);
-    alert('PDF download engine could not load. Please refresh and try again.');
     return null;
+  }
+};
+
+export const downloadHtmlPdf = async (
+  elementId: string,
+  filename: string,
+  orientation: PdfOrientation = 'portrait',
+  margin: number | number[] = 0.5
+) => {
+  try {
+    const win = window as any;
+    if (!win.html2pdf) {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js');
+    }
+
+    if (!win.html2pdf) {
+      alert('PDF download engine could not load. Please refresh and try again.');
+      return false;
+    }
+
+    const element = document.getElementById(elementId);
+    if (!element) {
+      alert('PDF template was not found. Please refresh and try again.');
+      return false;
+    }
+
+    element.style.display = 'block';
+    try {
+      await win.html2pdf().set({
+        margin,
+        filename,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, letterRendering: true },
+        jsPDF: { unit: 'in', format: 'a4', orientation },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'], avoid: ['tr', '.pdf-row', '.pdf-card'] },
+      }).from(element).save();
+    } finally {
+      element.style.display = 'none';
+    }
+    return true;
+  } catch (error) {
+    console.error(error);
+    alert('PDF download failed. Please refresh and try again.');
+    return false;
   }
 };
 

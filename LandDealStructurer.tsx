@@ -40,7 +40,7 @@ import {
   formatInputNumber,
   parseInputNumber
 } from '../utils/formatters';
-import { addPdfFooter, addPdfHeader, autoTable, createPdfDoc, pdfTableDefaults } from '../utils/pdf';
+import { addPdfFooter, addPdfHeader, autoTable, createPdfDoc, downloadHtmlPdf, pdfTableDefaults } from '../utils/pdf';
 import { supabase } from '../supabaseClient';
 
 const CONVERSION_RATES = {
@@ -404,11 +404,18 @@ const handleClear = () => {
 
  const handleDownloadPDF = async () => {
     if (!result) return;
-    const doc = await createPdfDoc('portrait');
-    if (!doc) return;
-    
     const villageName = identity.village ? identity.village.replace(/\s+/g, '_') : 'Village';
     const fpNumber = identity.fpNumber ? identity.fpNumber.replace(/\s+/g, '') : 'FP';
+    const filename = `GDK_NEXUS_${villageName}_FP${fpNumber}.pdf`;
+    const fallback = () => downloadHtmlPdf('pdf-template', filename, 'portrait', [0.3, 0.3, 0.3, 0.3]);
+
+    const doc = await createPdfDoc('portrait');
+    if (!doc) {
+      await fallback();
+      return;
+    }
+
+    try {
     const currentLandedCost = costSheetBasis === '100' ? result.landedCost100 : result.landedCost60;
     const currentStampDuty = costSheetBasis === '100' ? result.stampDuty100 : result.stampDuty60;
     const currentJantriDisplay = costSheetBasis === '100' ? result.totalJantriValue : result.fpJantriValue;
@@ -489,16 +496,27 @@ const handleClear = () => {
     });
 
     addPdfFooter(doc);
-    doc.save(`GDK_NEXUS_${villageName}_FP${fpNumber}.pdf`);
+    doc.save(filename);
+    } catch (error) {
+      console.error(error);
+      await fallback();
+    }
  };
 
   const handleDownloadLedgerPDF = async () => {
-    const doc = await createPdfDoc('portrait');
-    if (!doc) return;
-    
     const villageName = identity.village ? identity.village.replace(/\s+/g, '_') : 'Village';
     const fromDate = new Date(ledgerRange.from).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
     const toDate = new Date(ledgerRange.to).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    const filename = `LEDGER_${villageName}_${fromDate}_to_${toDate}.pdf`;
+    const fallback = () => downloadHtmlPdf('ledger-pdf-template', filename, 'portrait', [0.5, 0.5, 0.5, 0.5]);
+
+    const doc = await createPdfDoc('portrait');
+    if (!doc) {
+      await fallback();
+      return;
+    }
+
+    try {
     const transactions = getFilteredLedger();
     const total = transactions.reduce((sum, item) => sum + item.amount, 0);
 
@@ -523,7 +541,11 @@ const handleClear = () => {
     });
 
     addPdfFooter(doc);
-    doc.save(`LEDGER_${villageName}_${fromDate}_to_${toDate}.pdf`);
+    doc.save(filename);
+    } catch (error) {
+      console.error(error);
+      await fallback();
+    }
   };
 
   // Reactive Handlers
