@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { jsPDF } from 'jspdf';
+import runAutoTable from 'jspdf-autotable';
 import { 
   ArrowLeft, 
-  Hash,
+  Search, 
   Calendar,
   LayoutGrid,
   ChevronDown,
@@ -18,7 +20,6 @@ import {
   MessageSquare,
   PlusCircle,
   User,
-  Phone,
   Trash2,
   Download
 } from 'lucide-react';
@@ -85,6 +86,59 @@ interface PlotDealState {
   agentCommissionType?: 'percent' | 'value';
 }
 
+type SearchMode = 'plotNumber' | 'customerName' | 'phoneNumber' | 'all';
+
+const SEARCH_PLACEHOLDERS: Record<SearchMode, string> = {
+  plotNumber: 'Search plot number...',
+  customerName: 'Search customer name...',
+  phoneNumber: 'Search phone number...',
+  all: 'Search plot, customer, or phone...'
+};
+
+const normalizeText = (value: unknown) => String(value || '').trim().toLowerCase();
+const normalizePhone = (value: unknown) => String(value || '').trim().replace(/[\s\-()+]/g, '');
+const normalizePlotNumber = (value: unknown) => String(value || '').trim().toLowerCase();
+
+const getFirstPresentValue = (source: any, fields: string[]) => {
+  for (const field of fields) {
+    if (source?.[field] !== undefined && source?.[field] !== null && String(source[field]).trim() !== '') {
+      return source[field];
+    }
+  }
+  return '';
+};
+
+const getPlotNumberValue = (plot: any) => getFirstPresentValue(plot, ['plotNumber', 'plotNo', 'plot_number', 'plot']);
+const getCustomerNameValue = (plot: any) => getFirstPresentValue(plot, ['customerName', 'buyerName', 'clientName', 'name']);
+const getPhoneValue = (plot: any) => getFirstPresentValue(plot, ['phoneNumber', 'mobileNumber', 'contactNumber', 'phone', 'mobile', 'contact']);
+
+const plotMatchesSearch = (plot: any, rawSearchTerm: string, searchMode: SearchMode) => {
+  const query = rawSearchTerm.trim();
+  if (!query) return true;
+
+  const textQuery = normalizeText(query);
+  const phoneQuery = normalizePhone(query);
+  const hasLetters = /[a-z]/i.test(query);
+  const hasPhoneFormatting = /[\s\-()+]/.test(query);
+
+  const plotNumber = normalizePlotNumber(getPlotNumberValue(plot));
+  const customerName = normalizeText(getCustomerNameValue(plot));
+  const phone = normalizePhone(getPhoneValue(plot));
+
+  const matchesPlotNumber = Boolean(plotNumber) && plotNumber === textQuery;
+  const matchesCustomerName = Boolean(customerName) && customerName.includes(textQuery);
+  const matchesPhone = Boolean(phoneQuery) && Boolean(phone) && phone.includes(phoneQuery);
+
+  if (searchMode === 'plotNumber') return matchesPlotNumber;
+  if (searchMode === 'customerName') return matchesCustomerName;
+  if (searchMode === 'phoneNumber') return matchesPhone;
+
+  if (hasLetters) return matchesCustomerName || matchesPlotNumber;
+  if (phoneQuery.length >= 5 || hasPhoneFormatting) return matchesPhone;
+
+  return matchesPlotNumber;
+};
+
 // Helpers
 const getLocalToday = () => {
     const now = new Date();
@@ -119,14 +173,15 @@ const sortScheduleByDate = (schedule: PaymentInstallment[]) => {
 };
 
 export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottingData, projectId }) => {
-  const [plotNumberFilter, setPlotNumberFilter] = useState('');
-  const [customerNameFilter, setCustomerNameFilter] = useState('');
-  const [phoneFilter, setPhoneFilter] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchMode, setSearchMode] = useState<SearchMode>('plotNumber');
   const [expandedPlotId, setExpandedPlotId] = useState<string | null>(null);
   const [localPlottingData, setLocalPlottingData] = useState(plottingData);
-const [showReportPreview, setShowReportPreview] = useState(false);
+  const [showReportPreview, setShowReportPreview] = useState(false);
   const [showCollectionModal, setShowCollectionModal] = useState(false);
-  const [collectionDates, setCollectionDates] = useState({ from: getLocalToday(), to: getLocalToday() });  useEffect(() => {
+  const [collectionDates, setCollectionDates] = useState({ from: getLocalToday(), to: getLocalToday() });
+
+  useEffect(() => {
     setLocalPlottingData(plottingData);
   }, [plottingData]);
 
@@ -135,30 +190,15 @@ const [showReportPreview, setShowReportPreview] = useState(false);
   const landRate = Number(data.landRate) || 0;
   const devRate = Number(data.devRate) || 0;
 
-  const hasActiveFilters = Boolean(plotNumberFilter || customerNameFilter || phoneFilter);
-
-  const clearFilters = () => {
-    setPlotNumberFilter('');
-    setCustomerNameFilter('');
-    setPhoneFilter('');
-  };
-
   // 1. FILTERING: Only show valid plots (Name & Number exist)
   const filteredPlots = plots.filter((plot: any) => {
     if (!plot.customerName || !plot.plotNumber) return false;
 
-    const plotNumber = String(plot.plotNumber || '').toLowerCase();
-    const customerName = String(plot.customerName || '').toLowerCase();
-    const phone = String(plot.phoneNumber || '');
-    const phoneDigits = phone.replace(/\D/g, '');
-    const phoneQuery = phoneFilter.replace(/\D/g, '');
-
-    const matchesPlot = !plotNumberFilter || plotNumber.includes(plotNumberFilter.toLowerCase().trim());
-    const matchesName = !customerNameFilter || customerName.includes(customerNameFilter.toLowerCase().trim());
-    const matchesPhone = !phoneFilter || phone.toLowerCase().includes(phoneFilter.toLowerCase().trim()) || (Boolean(phoneQuery) && phoneDigits.includes(phoneQuery));
-
-    return matchesPlot && matchesName && matchesPhone;
+    return plotMatchesSearch(plot, searchTerm, searchMode);
   });
+
+  const searchPlaceholder = SEARCH_PLACEHOLDERS[searchMode];
+  const isPhoneSearch = searchMode === 'phoneNumber';
 
   const toggleExpand = (id: string) => {
     setExpandedPlotId(expandedPlotId === id ? null : id);
@@ -191,13 +231,15 @@ const [showReportPreview, setShowReportPreview] = useState(false);
   };
 
   const handleGenerateProjectReport = async () => {
-    const doc = await createPdfDoc('landscape');
-    if (!doc) {
-      failPdfDownload('Project Report', new Error('Unable to create PDF document.'));
-      return;
-    }
-
     try {
+    console.log('[ProjectPlotsView] Project Report PDF clicked -> handleGenerateProjectReport');
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+    doc.setProperties({
+      title: 'GDK Nexus Project Sales Report',
+      subject: 'A4 project sales report',
+      creator: 'GDK Nexus 2442',
+    });
+
     const m = projectData.measurements;
     let baseVal = 0;
     let baseUnit = 'Vaar';
@@ -252,26 +294,102 @@ const [showReportPreview, setShowReportPreview] = useState(false);
       ];
     });
 
-    addPdfHeader(doc, `PROJECT SALES REPORT: ${projectData.identity.village}`, `Estimated sale: ${formatPdfCurrency(projectEstSale)} | Sold gross: ${formatPdfCurrency(gTotalGross)} | Unsold value: ${formatPdfCurrency(projectEstSale - gTotalGross)}`);
-    autoTable(doc, {
-      startY: getPdfContentStartY(),
-      margin: { left: 28, right: 28 },
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = { top: 30, right: 10, bottom: 14, left: 10 };
+    const drawReportHeader = () => {
+      doc.setFillColor(30, 41, 59);
+      doc.rect(0, 0, pageWidth, 7, 'F');
+      doc.setFillColor(249, 115, 22);
+      doc.rect(0, 7, pageWidth, 1.5, 'F');
+      doc.setFillColor(255, 247, 237);
+      doc.roundedRect(margin.left, 12, 3, 10, 1, 1, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(15);
+      doc.setTextColor(15, 23, 42);
+      doc.text(`PROJECT SALES REPORT: ${projectData.identity.village}`, margin.left + 6, 15, {
+        maxWidth: pageWidth - margin.left - margin.right - 6,
+      });
+      doc.setFontSize(8.5);
+      doc.setTextColor(51, 65, 85);
+      doc.text(
+        `Estimated sale: ${formatPdfCurrency(projectEstSale)} | Sold gross: ${formatPdfCurrency(gTotalGross)} | Unsold value: ${formatPdfCurrency(projectEstSale - gTotalGross)}`,
+        margin.left + 6,
+        21,
+        { maxWidth: pageWidth - margin.left - margin.right - 6 }
+      );
+      doc.setDrawColor(249, 115, 22);
+      doc.setLineWidth(0.35);
+      doc.line(margin.left, 25, pageWidth - margin.right, 25);
+    };
+
+    drawReportHeader();
+    runAutoTable(doc, {
+      startY: margin.top,
+      margin,
       head: [['Plot', 'Customer', 'Size', 'Gross Value', 'Commission', 'Net Deal', 'Received', 'Pending']],
       body: rows,
       foot: [['Grand Totals', '', '', formatPdfCurrency(gTotalGross), formatPdfCurrency(gTotalComm), formatPdfCurrency(gTotalNet), formatPdfCurrency(gTotalRec), formatPdfCurrency(gTotalPend)]],
+      theme: 'grid',
+      showHead: 'everyPage',
       showFoot: 'lastPage',
+      pageBreak: 'auto',
+      rowPageBreak: 'avoid',
+      tableLineColor: [71, 85, 105],
+      tableLineWidth: 0.2,
+      styles: {
+        font: 'helvetica',
+        fontSize: 8,
+        cellPadding: { top: 2, right: 2, bottom: 2, left: 2 },
+        overflow: 'linebreak',
+        valign: 'middle',
+        lineColor: [71, 85, 105],
+        lineWidth: 0.2,
+        textColor: [15, 23, 42],
+      },
+      headStyles: {
+        fillColor: [30, 41, 59],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8,
+      },
+      alternateRowStyles: {
+        fillColor: [241, 245, 249],
+      },
+      footStyles: {
+        fillColor: [255, 247, 237],
+        textColor: [15, 23, 42],
+        fontStyle: 'bold',
+        fontSize: 8.2,
+      },
       columnStyles: {
-        0: { cellWidth: 42 },
-        1: { cellWidth: 118 },
-        2: { halign: 'right', cellWidth: 64 },
-        3: { halign: 'right', cellWidth: 112, fontStyle: 'bold' },
-        4: { halign: 'right', cellWidth: 100, fontStyle: 'bold' },
-        5: { halign: 'right', cellWidth: 112, fontStyle: 'bold' },
-        6: { halign: 'right', cellWidth: 112, fontStyle: 'bold' },
-        7: { halign: 'right', cellWidth: 112, fontStyle: 'bold' },
+        0: { cellWidth: 12 },
+        1: { cellWidth: 32 },
+        2: { halign: 'right', cellWidth: 18 },
+        3: { halign: 'right', cellWidth: 26, fontStyle: 'bold' },
+        4: { halign: 'right', cellWidth: 24, fontStyle: 'bold' },
+        5: { halign: 'right', cellWidth: 26, fontStyle: 'bold' },
+        6: { halign: 'right', cellWidth: 26, fontStyle: 'bold' },
+        7: { halign: 'right', cellWidth: 26, fontStyle: 'bold' },
+      },
+      didDrawPage: () => {
+        drawReportHeader();
       },
     });
-    addPdfFooter(doc);
+
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let page = 1; page <= pageCount; page++) {
+      doc.setPage(page);
+      doc.setDrawColor(249, 115, 22);
+      doc.setLineWidth(0.3);
+      doc.line(margin.left, pageHeight - 10, pageWidth - margin.right, pageHeight - 10);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(51, 65, 85);
+      doc.text('GDK NEXUS 2442', margin.left, pageHeight - 5);
+      doc.text(`Page ${page} of ${pageCount}`, pageWidth - margin.right, pageHeight - 5, { align: 'right' });
+    }
+
     doc.save(`Project_Report_${projectData.identity.village}.pdf`);
     } catch (error) {
       failPdfDownload('Project Report', error);
@@ -358,6 +476,83 @@ const [showReportPreview, setShowReportPreview] = useState(false);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 animate-in fade-in duration-500 font-sans pb-12">
+      <style>{`
+        @media print {
+          @page {
+            size: A4;
+            margin: 0;
+          }
+
+          body * {
+            visibility: hidden !important;
+          }
+
+          .project-report-print-page,
+          .project-report-print-page * {
+            visibility: visible !important;
+          }
+
+          .project-report-print-modal {
+            position: static !important;
+            inset: auto !important;
+            display: block !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            backdrop-filter: none !important;
+          }
+
+          .project-report-print-dialog {
+            width: 210mm !important;
+            height: auto !important;
+            max-width: none !important;
+            max-height: none !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+            overflow: visible !important;
+          }
+
+          .project-report-print-hidden {
+            display: none !important;
+          }
+
+          .project-report-print-page {
+            position: absolute !important;
+            inset: 0 auto auto 0 !important;
+            width: 210mm !important;
+            min-height: 297mm !important;
+            padding: 8mm !important;
+            box-sizing: border-box !important;
+            background: #ffffff !important;
+            color: #1f2937 !important;
+            overflow: visible !important;
+          }
+
+          .project-report-print-table-wrap {
+            overflow: visible !important;
+            border-radius: 0 !important;
+          }
+
+          .project-report-print-table {
+            width: 100% !important;
+            min-width: 0 !important;
+            table-layout: fixed !important;
+            border-collapse: collapse !important;
+            font-size: 7px !important;
+          }
+
+          .project-report-print-table th,
+          .project-report-print-table td {
+            padding: 1.5mm !important;
+            overflow-wrap: anywhere !important;
+            word-break: normal !important;
+          }
+
+          .pdf-row {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+        }
+      `}</style>
       <header className="bg-white border-b border-slate-200 py-4 px-4 md:px-8 shadow-sm sticky top-0 z-30">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-3">
@@ -383,7 +578,10 @@ const [showReportPreview, setShowReportPreview] = useState(false);
               <span className="hidden md:inline">Collection Statement</span>
             </button>
             <button 
-              onClick={() => setShowReportPreview(true)}
+              onClick={() => {
+                console.log('[ProjectPlotsView] Preview PDF clicked -> setShowReportPreview(true)');
+                setShowReportPreview(true);
+              }}
               className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm"
             >
               <LayoutGrid size={16} className="text-orange-500" />
@@ -400,55 +598,33 @@ const [showReportPreview, setShowReportPreview] = useState(false);
       </header>
 
       <main className="max-w-7xl mx-auto px-4 md:px-8 mt-8">
-        <div className="mb-6 bg-white border border-slate-200 rounded-xl shadow-sm p-3">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="relative group">
-              <Hash size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-orange-500 transition-colors" />
-              <input
-                type="text"
-                inputMode="numeric"
-                placeholder="Plot number"
-                value={plotNumberFilter}
-                onChange={(e) => setPlotNumberFilter(e.target.value.trimStart())}
-                className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all"
-              />
+        <div className="mb-6 flex flex-col gap-3 md:max-w-2xl md:flex-row">
+            <div className="relative group md:w-56">
+                <select
+                    value={searchMode}
+                    onChange={(e) => setSearchMode(e.target.value as SearchMode)}
+                    className="w-full appearance-none bg-white border border-slate-200 rounded-xl py-2.5 pl-3 pr-9 text-sm font-semibold text-slate-700 focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all shadow-sm"
+                >
+                    <option value="plotNumber">Search by Plot Number</option>
+                    <option value="customerName">Search by Customer Name</option>
+                    <option value="phoneNumber">Search by Phone Number</option>
+                    <option value="all">Search All</option>
+                </select>
+                <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             </div>
-            <div className="relative group">
-              <User size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-orange-500 transition-colors" />
-              <input
-                type="text"
-                placeholder="Customer name"
-                value={customerNameFilter}
-                onChange={(e) => setCustomerNameFilter(e.target.value.trimStart())}
-                className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all"
-              />
+            <div className="relative group flex-1">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Search size={16} className="text-slate-400 group-focus-within:text-orange-500 transition-colors" />
+                </div>
+                <input 
+                    type={isPhoneSearch ? 'tel' : 'text'}
+                    inputMode={isPhoneSearch ? 'tel' : 'search'}
+                    placeholder={searchPlaceholder}
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all shadow-sm"
+                />
             </div>
-            <div className="relative group">
-              <Phone size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-orange-500 transition-colors" />
-              <input
-                type="tel"
-                inputMode="tel"
-                placeholder="Phone number"
-                value={phoneFilter}
-                onChange={(e) => setPhoneFilter(e.target.value.trimStart())}
-                className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all"
-              />
-            </div>
-          </div>
-          {hasActiveFilters && (
-            <div className="mt-3 flex items-center justify-between gap-3 text-xs">
-              <span className="font-bold text-slate-400 uppercase tracking-wider">
-                {filteredPlots.length} matching result{filteredPlots.length === 1 ? '' : 's'}
-              </span>
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="text-slate-500 hover:text-orange-600 font-bold transition-colors"
-              >
-                Clear filters
-              </button>
-            </div>
-          )}
         </div>
 
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
@@ -692,11 +868,11 @@ const [showReportPreview, setShowReportPreview] = useState(false);
 
     {/* MOBILE FRIENDLY REPORT PREVIEW MODAL */}
       {showReportPreview && (
-        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-0 md:p-6 transition-all">
-          <div className="bg-white w-full h-full md:h-auto md:max-h-[90vh] md:max-w-6xl md:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
+        <div className="project-report-print-modal fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-0 md:p-6 transition-all">
+          <div className="project-report-print-dialog bg-white w-full h-full md:h-auto md:max-h-[90vh] md:max-w-6xl md:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
             
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 bg-slate-50 border-b border-slate-200">
+            <div className="project-report-print-hidden flex items-center justify-between px-6 py-4 bg-slate-50 border-b border-slate-200">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">Project Sales Preview</h2>
                 <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">{projectData.identity.village}</p>
@@ -745,7 +921,7 @@ const [showReportPreview, setShowReportPreview] = useState(false);
                 });
 
                 return (
-                  <div className="space-y-8">
+                  <div className="project-report-print-page space-y-8">
                     {/* Top Stats Cards */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="bg-slate-100 p-4 rounded-xl">
@@ -763,8 +939,8 @@ const [showReportPreview, setShowReportPreview] = useState(false);
                     </div>
 
                     {/* Table Summary */}
-                   <div className="border border-slate-200 rounded-xl overflow-x-auto shadow-inner bg-slate-50/30">
-  <table className="w-full text-xs text-left min-w-[800px]">
+                   <div className="project-report-print-table-wrap border border-slate-200 rounded-xl overflow-x-auto shadow-inner bg-slate-50/30">
+  <table className="project-report-print-table w-full text-xs text-left min-w-[800px]">
                         <thead className="bg-slate-900 text-white uppercase text-[10px]">
                           <tr>
                             <th className="px-4 py-3">Plot</th>
@@ -777,7 +953,7 @@ const [showReportPreview, setShowReportPreview] = useState(false);
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {plotSummary.map((p) => (
-                           <tr key={p.id} className="hover:bg-slate-50">
+                           <tr key={p.id} className="pdf-row hover:bg-slate-50">
   <td className="px-4 py-3 font-bold text-slate-700">#{p.plotNumber}</td>
   <td className="px-4 py-3">
     <div className="font-bold text-slate-900">{p.customerName}</div>
@@ -830,7 +1006,7 @@ const [showReportPreview, setShowReportPreview] = useState(false);
                               <td className="px-4 py-3 text-right text-orange-600 font-bold">{formatCurrency(p.pend)}</td>
                             </tr>
                           ))}
-                          <tr className="bg-slate-50 font-bold text-slate-900 border-t-2 border-slate-200">
+                          <tr className="pdf-row bg-slate-50 font-bold text-slate-900 border-t-2 border-slate-200">
                             <td colSpan={3} className="px-4 py-4 text-center uppercase">Grand Totals</td>
                             <td className="px-4 py-4 text-right">{formatCurrency(gTotalNet)}</td>
                             <td className="px-4 py-4 text-right text-emerald-700">{formatCurrency(gTotalRec)}</td>
@@ -845,7 +1021,7 @@ const [showReportPreview, setShowReportPreview] = useState(false);
             </div>
 
             {/* Modal Footer */}
-            <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-3">
+            <div className="project-report-print-hidden p-4 bg-slate-50 border-t border-slate-200 flex gap-3">
               <button 
                 onClick={handleGenerateProjectReport}
                 className="flex-1 bg-slate-900 text-white py-3 rounded-xl font-bold text-sm shadow-lg hover:bg-black transition-all flex items-center justify-center gap-2"
