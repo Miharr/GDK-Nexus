@@ -84,6 +84,58 @@ interface PlotDealState {
   agentCommissionType?: 'percent' | 'value';
 }
 
+type SearchMode = 'plotNumber' | 'customerName' | 'phoneNumber' | 'all';
+
+const SEARCH_PLACEHOLDERS: Record<SearchMode, string> = {
+  plotNumber: 'Search plot number...',
+  customerName: 'Search customer name...',
+  phoneNumber: 'Search phone number...',
+  all: 'Search plot, customer, or phone...'
+};
+
+const normalizeText = (value: unknown) => String(value || '').trim().toLowerCase();
+const normalizePhone = (value: unknown) => String(value || '').trim().replace(/[\s\-()+]/g, '');
+
+const getFirstPresentValue = (source: any, fields: string[]) => {
+  for (const field of fields) {
+    if (source?.[field] !== undefined && source?.[field] !== null && String(source[field]).trim() !== '') {
+      return source[field];
+    }
+  }
+  return '';
+};
+
+const getPlotNumberValue = (plot: any) => getFirstPresentValue(plot, ['plotNumber', 'plotNo', 'plot_number', 'plot']);
+const getCustomerNameValue = (plot: any) => getFirstPresentValue(plot, ['customerName', 'buyerName', 'clientName', 'name']);
+const getPhoneValue = (plot: any) => getFirstPresentValue(plot, ['phoneNumber', 'mobileNumber', 'contactNumber', 'phone', 'mobile', 'contact']);
+
+const plotMatchesSearch = (plot: any, rawSearchTerm: string, searchMode: SearchMode) => {
+  const query = rawSearchTerm.trim();
+  if (!query) return true;
+
+  const textQuery = normalizeText(query);
+  const phoneQuery = normalizePhone(query);
+  const hasLetters = /[a-z]/i.test(query);
+  const hasPhoneFormatting = /[\s\-()+]/.test(query);
+
+  const plotNumber = normalizeText(getPlotNumberValue(plot));
+  const customerName = normalizeText(getCustomerNameValue(plot));
+  const phone = normalizePhone(getPhoneValue(plot));
+
+  const matchesPlotNumber = Boolean(plotNumber) && plotNumber.includes(textQuery);
+  const matchesCustomerName = Boolean(customerName) && customerName.includes(textQuery);
+  const matchesPhone = Boolean(phoneQuery) && Boolean(phone) && phone.includes(phoneQuery);
+
+  if (searchMode === 'plotNumber') return matchesPlotNumber;
+  if (searchMode === 'customerName') return matchesCustomerName;
+  if (searchMode === 'phoneNumber') return matchesPhone;
+
+  if (hasLetters) return matchesCustomerName || matchesPlotNumber;
+  if (phoneQuery.length >= 5 || hasPhoneFormatting) return matchesPhone;
+
+  return matchesPlotNumber;
+};
+
 // Helpers
 const getLocalToday = () => {
     const now = new Date();
@@ -119,11 +171,14 @@ const sortScheduleByDate = (schedule: PaymentInstallment[]) => {
 
 export const ProjectPlotsView: React.FC<Props> = ({ onBack, projectData, plottingData, projectId }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchMode, setSearchMode] = useState<SearchMode>('plotNumber');
   const [expandedPlotId, setExpandedPlotId] = useState<string | null>(null);
   const [localPlottingData, setLocalPlottingData] = useState(plottingData);
-const [showReportPreview, setShowReportPreview] = useState(false);
+  const [showReportPreview, setShowReportPreview] = useState(false);
   const [showCollectionModal, setShowCollectionModal] = useState(false);
-  const [collectionDates, setCollectionDates] = useState({ from: getLocalToday(), to: getLocalToday() });  useEffect(() => {
+  const [collectionDates, setCollectionDates] = useState({ from: getLocalToday(), to: getLocalToday() });
+
+  useEffect(() => {
     setLocalPlottingData(plottingData);
   }, [plottingData]);
 
@@ -136,13 +191,11 @@ const [showReportPreview, setShowReportPreview] = useState(false);
   const filteredPlots = plots.filter((plot: any) => {
     if (!plot.customerName || !plot.plotNumber) return false;
 
-    const q = searchTerm.toLowerCase();
-    return (
-      (plot.customerName?.toLowerCase().includes(q) || '') ||
-      (plot.plotNumber?.toString().includes(q) || '') ||
-      (plot.phoneNumber?.includes(q) || '')
-    );
+    return plotMatchesSearch(plot, searchTerm, searchMode);
   });
+
+  const searchPlaceholder = SEARCH_PLACEHOLDERS[searchMode];
+  const isPhoneSearch = searchMode === 'phoneNumber';
 
   const toggleExpand = (id: string) => {
     setExpandedPlotId(expandedPlotId === id ? null : id);
@@ -384,17 +437,33 @@ const [showReportPreview, setShowReportPreview] = useState(false);
       </header>
 
       <main className="max-w-7xl mx-auto px-4 md:px-8 mt-8">
-        <div className="mb-6 relative group max-w-md">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Search size={16} className="text-slate-400 group-focus-within:text-orange-500 transition-colors" />
+        <div className="mb-6 flex flex-col gap-3 md:max-w-2xl md:flex-row">
+            <div className="relative group md:w-56">
+                <select
+                    value={searchMode}
+                    onChange={(e) => setSearchMode(e.target.value as SearchMode)}
+                    className="w-full appearance-none bg-white border border-slate-200 rounded-xl py-2.5 pl-3 pr-9 text-sm font-semibold text-slate-700 focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all shadow-sm"
+                >
+                    <option value="plotNumber">Search by Plot Number</option>
+                    <option value="customerName">Search by Customer Name</option>
+                    <option value="phoneNumber">Search by Phone Number</option>
+                    <option value="all">Search All</option>
+                </select>
+                <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             </div>
-            <input 
-                type="text" 
-                placeholder="Search Customer, Plot #..." 
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all shadow-sm"
-            />
+            <div className="relative group flex-1">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Search size={16} className="text-slate-400 group-focus-within:text-orange-500 transition-colors" />
+                </div>
+                <input 
+                    type={isPhoneSearch ? 'tel' : 'text'}
+                    inputMode={isPhoneSearch ? 'tel' : 'search'}
+                    placeholder={searchPlaceholder}
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all shadow-sm"
+                />
+            </div>
         </div>
 
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
